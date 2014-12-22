@@ -111,7 +111,20 @@ public OnPluginStart()
 public OnPluginEnd()
 {
 	SaveAllZoneGroupsToFile();
-	// TODO: Kill all created trigger_multiple.
+	
+	// Kill all created trigger_multiple.
+	new iNumGroups = GetArraySize(g_hZoneGroups);
+	new iNumZones, group[ZoneGroup], zoneData[ZoneData];
+	for(new i=0;i<iNumGroups;i++)
+	{
+		GetGroupByIndex(i, group);
+		iNumZones = GetArraySize(group[ZG_zones]);
+		for(new c=0;c<iNumZones;c++)
+		{
+			GetZoneByIndex(c, group, zoneData);
+			RemoveZoneTrigger(group, zoneData);
+		}
+	}
 }
 
 /**
