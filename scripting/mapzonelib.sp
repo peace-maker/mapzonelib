@@ -547,6 +547,7 @@ public EntOut_OnTouchEvent(const String:output[], caller, activator, Float:delay
 			return;
 	}
 	
+	// Inform other plugins, that someone entered or left this zone/cluster.
 	if(StrEqual(output, "OnStartTouch"))
 		Call_StartForward(g_hfwdOnEnterForward);
 	else
@@ -1044,7 +1045,7 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 
 DisplayZoneEditMenu(client)
 {
-	new group[ZoneGroup], zoneData[ZoneData];
+	new group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 
@@ -1060,7 +1061,6 @@ DisplayZoneEditMenu(client)
 		SetMenuTitle(hMenu, "Manage zone \"%s\" in group \"%s\"", zoneData[ZD_name], group[ZG_name]);
 	else
 	{
-		new zoneCluster[ZoneCluster];
 		GetZoneClusterByIndex(g_ClientMenuState[client][CMS_cluster], group, zoneCluster);
 		SetMenuTitle(hMenu, "Manage zone \"%s\" in cluster \"%s\" of group \"%s\"", zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
 	}
@@ -1069,6 +1069,13 @@ DisplayZoneEditMenu(client)
 	AddMenuItem(hMenu, "position1", "Change first corner");
 	AddMenuItem(hMenu, "position2", "Change second corner");
 	AddMenuItem(hMenu, "rotation", "Change rotation");
+	
+	new String:sBuffer[128];
+	if(zoneData[ZD_clusterIndex] == -1)
+		Format(sBuffer, sizeof(sBuffer), "Add to a cluster");
+	else
+		Format(sBuffer, sizeof(sBuffer), "Remove from cluster \"%s\"", zoneCluster[ZC_name]);
+	AddMenuItem(hMenu, "cluster", sBuffer);
 	AddMenuItem(hMenu, "rename", "Rename");
 	AddMenuItem(hMenu, "delete", "Delete");
 	
@@ -1098,6 +1105,7 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 			TeleportEntity(param1, vBuf, NULL_VECTOR, NULL_VECTOR);
 			DisplayZoneEditMenu(param1);
 		}
+		// Change one of the 2 positions of the zone
 		else if(!StrContains(sInfo, "position"))
 		{
 			g_ClientMenuState[param1][CMS_editState] = (StrEqual(sInfo, "position1")?ZES_first:ZES_second);
@@ -1115,6 +1123,7 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 			
 			DisplayPositionEditMenu(param1);
 		}
+		// Change rotation of the zone
 		else if(StrEqual(sInfo, "rotation"))
 		{
 			// Copy current rotation from zoneData to clientstate.
@@ -1123,6 +1132,34 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 			// Show box now
 			TriggerTimer(g_hShowZonesTimer, true);
 			DisplayZoneRotationMenu(param1);
+		}
+		// Change the name of the zone
+		else if(StrEqual(sInfo, "cluster"))
+		{
+			// Not in a cluster.
+			if(zoneData[ZD_clusterIndex] == -1)
+			{
+				DisplayClusterSelectionMenu(param1);
+			}
+			// Zone is part of a cluster
+			else
+			{
+				new zoneCluster[ZoneCluster];
+				GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
+			
+				decl String:sBuffer[128];
+				new Handle:hPanel = CreatePanel();
+				Format(sBuffer, sizeof(sBuffer), "Do you really want to remove zone \"%s\" from cluster \"%s\"?", zoneData[ZD_name], zoneCluster[ZD_name]);
+				SetPanelTitle(hPanel, sBuffer);
+				
+				Format(sBuffer, sizeof(sBuffer), "%T", "Yes", param1);
+				DrawPanelItem(hPanel, sBuffer);
+				Format(sBuffer, sizeof(sBuffer), "%T", "No", param1);
+				DrawPanelItem(hPanel, sBuffer);
+				
+				SendPanelToClient(hPanel, param1, Panel_HandleConfirmRemoveFromCluster, MENU_TIME_FOREVER);
+				CloseHandle(hPanel);
+			}
 		}
 		// Change the name of the zone
 		else if(StrEqual(sInfo, "rename"))
@@ -1162,6 +1199,106 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 			g_ClientMenuState[param1][CMS_group] = -1;
 			g_ClientMenuState[param1][CMS_cluster] = -1;
 		}
+	}
+}
+
+DisplayClusterSelectionMenu(client)
+{
+	new group[ZoneGroup], zoneData[ZoneData];
+	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
+	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
+	
+	new Handle:hMenu = CreateMenu(Menu_HandleClusterSelection);
+	SetMenuTitle(hMenu, "Add zone \"%s\" to cluster:", zoneData[ZD_name]);
+	SetMenuExitBackButton(hMenu, true);
+
+	new iNumClusters = GetArraySize(group[ZG_cluster]);
+	new zoneCluster[ZoneCluster], String:sIndex[16], iClusterCount;
+	for(new i=0;i<iNumClusters;i++)
+	{
+		GetZoneClusterByIndex(i, group, zoneCluster);
+		
+		if(zoneCluster[ZC_deleted])
+			continue;
+		
+		IntToString(i, sIndex, sizeof(sIndex));
+		AddMenuItem(hMenu, sIndex, zoneCluster[ZC_name]);
+		iClusterCount++;
+	}
+	
+	if(!iClusterCount)
+		AddMenuItem(hMenu, "", "No clusters available.", ITEMDRAW_DISABLED);
+	
+	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+}
+
+public Menu_HandleClusterSelection(Handle:menu, MenuAction:action, param1, param2)
+{
+	if(action == MenuAction_End)
+	{
+		CloseHandle(menu);
+	}
+	else if(action == MenuAction_Select)
+	{
+		new String:sInfo[32];
+		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		
+		new group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
+		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
+		GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
+		
+		new iClusterIndex = StringToInt(sInfo);
+		GetZoneClusterByIndex(iClusterIndex, group, zoneCluster);
+		// That cluster isn't available anymore..
+		if(zoneCluster[ZC_deleted])
+		{
+			DisplayClusterSelectionMenu(param1);
+			return;
+		}
+		
+		PrintToChat(param1, "Map Zones > Zone \"%s\" is now part of cluster \"%s\".", zoneData[ZD_name], zoneCluster[ZC_name]);
+		
+		zoneData[ZD_clusterIndex] = iClusterIndex;
+		SaveZone(group, zoneData);
+		DisplayZoneEditMenu(param1);
+	}
+	else if(action == MenuAction_Cancel)
+	{
+		if(param2 == MenuCancel_ExitBack)
+		{
+			DisplayZoneEditMenu(param1);
+		}
+		else
+		{
+			g_ClientMenuState[param1][CMS_zone] = -1;
+			g_ClientMenuState[param1][CMS_cluster] = -1;
+			g_ClientMenuState[param1][CMS_group] = -1;
+		}
+	}
+}
+
+public Panel_HandleConfirmRemoveFromCluster(Handle:menu, MenuAction:action, param1, param2)
+{
+	if(action == MenuAction_Select)
+	{
+		// Selected "Yes" -> remove zone from cluster.
+		if(param2 == 1)
+		{
+			new group[ZoneGroup], zoneData[ZoneData];
+			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
+			GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
+			
+			zoneData[ZD_clusterIndex] = -1;
+			SaveZone(group, zoneData);
+		}
+		
+		DisplayZoneEditMenu(param1);
+	}
+	else if(action == MenuAction_Cancel)
+	{
+		g_ClientMenuState[param1][CMS_group] = -1;
+		g_ClientMenuState[param1][CMS_cluster] = -1;
+		g_ClientMenuState[param1][CMS_zone] = -1;
 	}
 }
 
