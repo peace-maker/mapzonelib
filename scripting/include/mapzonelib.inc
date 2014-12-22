@@ -27,6 +27,29 @@ native MapZone_RegisterZoneGroup(const String:group[]);
 native bool:MapZone_ShowMenu(client, const String:group[]);
 
 /**
+ * Called when a client selects the "Back" option in
+ * the zone group's root menu.
+ * Can be used to make the transition back into your own
+ * menu hierachy.
+ *
+ * @param client   The client index.
+ * @param group    The zone group name.
+ * @noreturn
+ */
+functag public MapZoneMenuBackCB(client, const String:group[]);
+
+/**
+ * Register for the back action of the zone group menu.
+ * Whenever a client wants to go back from the zone menus,
+ * you're able to show your own menus again using this callback.
+ *
+ * @param group    The zone group name.
+ * @param callback The callback function to call when a player presses the "Back" button in the zone root menu.
+ * @return True if callback registered, false if no zone group with that name.
+ */
+native bool:MapZone_SetMenuBackAction(const String:group[], MapZoneMenuBackCB:callback);
+
+/**
  * Called when a client enteres a zone.
  * 
  * @param client      The client index.
@@ -62,5 +85,6 @@ public __pl_mapzonelib_SetNTVOptional()
 {
 	MarkNativeAsOptional("MapZone_RegisterZoneGroup");
 	MarkNativeAsOptional("MapZone_ShowMenu");
+	MarkNativeAsOptional("MapZone_SetMenuBackAction");
 }
 #endif

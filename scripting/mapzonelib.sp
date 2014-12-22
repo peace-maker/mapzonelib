@@ -1,5 +1,6 @@
 #pragma semicolon 1
 #include <sourcemod>
+#include <mapzonelib>
 #include <smlib>
 
 #define PLUGIN_VERSION "1.0"
@@ -30,6 +31,7 @@ enum ZoneGroup {
 	ZG_index,
 	Handle:ZG_zones,
 	Handle:ZG_cluster,
+	Handle:ZG_menuBackForward,
 	bool:ZG_showZones,
 	String:ZG_name[MAX_ZONE_GROUP_NAME]
 }
@@ -82,7 +84,7 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 {
 	CreateNative("MapZone_RegisterZoneGroup", Native_RegisterZoneGroup);
 	CreateNative("MapZone_ShowMenu", Native_ShowMenu);
-	//CreateNative("MapZone_SetMenuBackAction", Native_SetMenuBackAction);
+	CreateNative("MapZone_SetMenuBackAction", Native_SetMenuBackAction);
 	RegPluginLibrary("mapzonelib");
 	return APLRes_Success;
 }
@@ -458,6 +460,30 @@ public Native_ShowMenu(Handle:plugin, numParams)
 	return true;
 }
 
+// native bool:MapZone_SetMenuBackAction(const String:group[], MapZoneMenuBackCB:callback);
+public Native_SetMenuBackAction(Handle:plugin, numParams)
+{
+	new String:sName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sName, sizeof(sName));
+	
+	new MapZoneMenuBackCB:callback = MapZoneMenuBackCB:GetNativeCell(2);
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sName, group))
+		return false;
+	
+	// Someone registered a menu back action before. Overwrite it.
+	if(group[ZG_menuBackForward] != INVALID_HANDLE)
+		// Private forwards don't allow to just clear all functions from the list. You HAVE to give the plugin handle -.-
+		CloseHandle(group[ZG_menuBackForward]);
+	
+	group[ZG_menuBackForward] = CreateForward(ET_Ignore, Param_Cell, Param_String);
+	AddToForward(group[ZG_menuBackForward], plugin, callback);
+	SaveGroup(group);
+	
+	return true;
+}
+
 /**
  * Entity output handler
  */
@@ -678,6 +704,8 @@ DisplayGroupRootMenu(client, group[ZoneGroup])
 	new Handle:hMenu = CreateMenu(Menu_HandleGroupRoot);
 	SetMenuTitle(hMenu, "Manage zone group \"%s\"", group[ZG_name]);
 	SetMenuExitButton(hMenu, true);
+	if(group[ZG_menuBackForward] != INVALID_HANDLE)
+		SetMenuExitBackButton(hMenu, true);
 	
 	new String:sBuffer[64];
 	Format(sBuffer, sizeof(sBuffer), "Show Zones: %T", (group[ZG_showZones]?"Yes":"No"), client);
@@ -739,6 +767,19 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 	}
 	else if(action == MenuAction_Cancel)
 	{
+		if(param2 == MenuCancel_ExitBack)
+		{
+			new group[ZoneGroup];
+			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
+			// This group has a menu back action handler registered? Call it!
+			if(group[ZG_menuBackForward] != INVALID_HANDLE)
+			{
+				Call_StartForward(group[ZG_menuBackForward]);
+				Call_PushCell(param1);
+				Call_PushString(group[ZG_name]);
+				Call_Finish();
+			}
+		}
 		g_ClientMenuState[param1][CMS_group] = -1;
 	}
 }
