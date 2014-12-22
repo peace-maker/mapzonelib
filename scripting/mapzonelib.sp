@@ -13,6 +13,7 @@ enum ZoneData {
 	Float:ZD_position[3],
 	Float:ZD_mins[3],
 	Float:ZD_maxs[3],
+	Float:ZD_rotation[3],
 	bool:ZD_deleted, // We can't directly delete zones, because we use the array index as identifier. Deleting would mean an array shiftup.
 	String:ZD_name[MAX_ZONE_NAME]
 }
@@ -35,10 +36,12 @@ enum ClientMenuState {
 	CMS_zone,
 	bool:CMS_rename,
 	bool:CMS_addZone,
+	bool:CMS_editRotation,
 	bool:CMS_editPosition,
 	ZoneEditState:CMS_editState,
 	Float:CMS_first[3],
-	Float:CMS_second[3]
+	Float:CMS_second[3],
+	Float:CMS_rotation[3]
 }
 
 new Handle:g_hfwdOnEnterForward;
@@ -127,6 +130,7 @@ public OnClientDisconnect(client)
 	g_ClientMenuState[client][CMS_group] = -1;
 	g_ClientMenuState[client][CMS_zone] = -1;
 	g_ClientMenuState[client][CMS_rename] = false;
+	g_ClientMenuState[client][CMS_editRotation] = false;
 	g_ClientMenuState[client][CMS_editPosition] = false;
 	ResetZoneAddingState(client);
 }
@@ -189,12 +193,67 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 {
 	static s_buttons[MAXPLAYERS+1];
 	
+	// Started pressing +use
+	// See if he wants to set a zone's position.
 	if(buttons & IN_USE && !(s_buttons[client] & IN_USE))
 	{
 		new Float:fOrigin[3];
 		GetClientAbsOrigin(client, fOrigin);
 		
 		HandleZonePositionSetting(client, fOrigin);
+	}
+		
+	// Update the rotation and display it directly
+	if(g_ClientMenuState[client][CMS_editRotation])
+	{
+		// Presses +use
+		if(buttons & IN_USE)
+		{
+			new Float:fAngles[3];
+			GetClientEyeAngles(client, fAngles);
+			
+			// Only display the laser bbox, if the player moved his mouse.
+			new bool:bChanged;
+			if(g_ClientMenuState[client][CMS_rotation][1] != fAngles[1])
+				bChanged = true;
+			
+			g_ClientMenuState[client][CMS_rotation][1] = fAngles[1];
+			// Pressing +speed (shift) switches X and Z axis.
+			if(buttons & IN_SPEED)
+			{
+				if(g_ClientMenuState[client][CMS_rotation][2] != fAngles[0])
+					bChanged = true;
+				g_ClientMenuState[client][CMS_rotation][2] = fAngles[0];
+			}
+			else
+			{
+				if(g_ClientMenuState[client][CMS_rotation][0] != fAngles[0])
+					bChanged = true;
+				g_ClientMenuState[client][CMS_rotation][0] = fAngles[0];
+			}
+			
+			// Change new rotated box, if rotation changed from previous frame.
+			if(bChanged)
+			{
+				new group[ZoneGroup], zoneData[ZoneData];
+				GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
+				GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
+				
+				new Float:fPos[3], Float:fMins[3], Float:fMaxs[3];
+				Array_Copy(zoneData[ZD_position], fPos, 3);
+				Array_Copy(zoneData[ZD_mins], fMins, 3);
+				Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
+				Array_Copy(g_ClientMenuState[client][CMS_rotation], fAngles, 3);
+				
+				Effect_DrawBeamBoxRotatableToClient(client, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 5.0, 5.0, 2, 1.0, {0,0,255,255}, 0);
+				Effect_DrawAxisOfRotationToClient(client, fPos, fAngles, Float:{10.0,10.0,10.0}, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 5.0, 5.0, 2, 1.0, 0);
+			}
+		}
+		// Show the laser box at the new position for a longer time.
+		// The above laser box is only displayed a splitsecond to produce a smoother animation.
+		// Have the current rotation persist, when stopping rotating.
+		else if(s_buttons[client] & IN_USE)
+			TriggerTimer(g_hShowZonesTimer, true);
 	}
 	
 	s_buttons[client] = buttons;
@@ -315,7 +374,7 @@ public Action:Timer_ShowZones(Handle:timer)
 {
 	new iNumGroups = GetArraySize(g_hZoneGroups);
 	new group[ZoneGroup], zoneData[ZoneData], iNumZones;
-	new Float:vFirstPoint[3], Float:vSecondPoint[3];
+	new Float:fPos[3], Float:fMins[3], Float:fMaxs[3], Float:fAngles[3];
 	for(new i=0;i<iNumGroups;i++)
 	{
 		GetGroupByIndex(i, group);
@@ -330,20 +389,19 @@ public Action:Timer_ShowZones(Handle:timer)
 			if(zoneData[ZD_deleted])
 				continue;
 			
-			for(new a=0;a<3;a++)
-			{
-				vFirstPoint[a] = zoneData[ZD_position][a] + zoneData[ZD_mins][a];
-				vSecondPoint[a] = zoneData[ZD_position][a] + zoneData[ZD_maxs][a];
-			}
+			Array_Copy(zoneData[ZD_position], fPos, 3);
+			Array_Copy(zoneData[ZD_mins], fMins, 3);
+			Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
+			Array_Copy(zoneData[ZD_rotation], fAngles, 3);
 			
-			Effect_DrawBeamBoxToAll(vFirstPoint, vSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, {255,0,0,255}, 0);
+			Effect_DrawBeamBoxRotatableToAll(fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, {255,0,0,255}, 0);
 		}
 	}
 	
+	new Float:vFirstPoint[3], Float: vSecondPoint[3];
 	for(new i=1;i<=MaxClients;i++)
 	{
-		if((g_ClientMenuState[i][CMS_addZone] && g_ClientMenuState[i][CMS_editState] == ZES_name)
-		|| g_ClientMenuState[i][CMS_editPosition])
+		if(g_ClientMenuState[i][CMS_addZone] && g_ClientMenuState[i][CMS_editState] == ZES_name)
 		{
 			for(new a=0;a<3;a++)
 			{
@@ -352,16 +410,51 @@ public Action:Timer_ShowZones(Handle:timer)
 			}
 			
 			Effect_DrawBeamBoxToClient(i, vFirstPoint, vSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, {0,0,255,255}, 0);
+		}
+		
+		if(g_ClientMenuState[i][CMS_editPosition]
+		|| g_ClientMenuState[i][CMS_editRotation])
+		{
+			GetGroupByIndex(g_ClientMenuState[i][CMS_group], group);
+			GetZoneByIndex(g_ClientMenuState[i][CMS_zone], group, zoneData);
+			
+			Array_Copy(zoneData[ZD_position], fPos, 3);
+			Array_Copy(g_ClientMenuState[i][CMS_rotation], fAngles, 3);
+			
+			// Get the bounds and only have the rotation changable.
+			if(g_ClientMenuState[i][CMS_editRotation])
+			{
+				Array_Copy(zoneData[ZD_mins], fMins, 3);
+				Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
+			}
 			
 			// Highlight the corner he's editing.
-			if(g_ClientMenuState[i][CMS_editPosition])
+			else if(g_ClientMenuState[i][CMS_editPosition])
 			{
+				Array_Copy(g_ClientMenuState[i][CMS_first], vFirstPoint, 3);
+				Array_Copy(g_ClientMenuState[i][CMS_second], vSecondPoint, 3);
+				
+				SubtractVectors(vFirstPoint, fPos, fMins);
+				SubtractVectors(vSecondPoint, fPos, fMaxs);
+				
 				if(g_ClientMenuState[i][CMS_editState] == ZES_first)
+				{
+					Math_RotateVector(fMins, fAngles, vFirstPoint);
+					AddVectors(vFirstPoint, fPos, vFirstPoint);
 					TE_SetupGlowSprite(vFirstPoint, g_iGlowSprite, 2.0, 1.0, 100);
+				}
 				else
+				{
+					Math_RotateVector(fMaxs, fAngles, vSecondPoint);
+					AddVectors(vSecondPoint, fPos, vSecondPoint);
 					TE_SetupGlowSprite(vSecondPoint, g_iGlowSprite, 2.0, 1.0, 100);
+				}
 				TE_SendToClient(i);
 			}
+			
+			// Draw the zone
+			Effect_DrawBeamBoxRotatableToClient(i, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, {0,0,255,255}, 0);
+			Effect_DrawAxisOfRotationToClient(i, fPos, fAngles, Float:{10.0,10.0,10.0}, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, 0);
 		}
 	}
 	
@@ -380,6 +473,8 @@ DisplayGroupRootMenu(client, group[ZoneGroup])
 		ResetZoneAddingState(client);
 		PrintToChat(client, "Map Zones > Aborted adding of zone.");
 	}
+	
+	g_ClientMenuState[client][CMS_editRotation] = false;
 
 	new Handle:hMenu = CreateMenu(Menu_HandleGroupRoot);
 	SetMenuTitle(hMenu, "Manage zones for \"%s\"", group[ZG_name]);
@@ -478,6 +573,7 @@ DisplayZoneEditMenu(client)
 	AddMenuItem(hMenu, "teleport", "Teleport to");
 	AddMenuItem(hMenu, "position1", "Change first corner");
 	AddMenuItem(hMenu, "position2", "Change second corner");
+	AddMenuItem(hMenu, "rotation", "Change rotation");
 	AddMenuItem(hMenu, "rename", "Rename");
 	AddMenuItem(hMenu, "delete", "Delete");
 	
@@ -517,9 +613,21 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 			{
 				g_ClientMenuState[param1][CMS_first][i] = zoneData[ZD_position][i] + zoneData[ZD_mins][i];
 				g_ClientMenuState[param1][CMS_second][i] = zoneData[ZD_position][i] + zoneData[ZD_maxs][i];
+				g_ClientMenuState[param1][CMS_rotation][i] = zoneData[ZD_rotation][i];
 			}
 			
+			TriggerTimer(g_hShowZonesTimer, true);
+			
 			DisplayPositionEditMenu(param1);
+		}
+		else if(StrEqual(sInfo, "rotation"))
+		{
+			// Copy current rotation from zoneData to clientstate.
+			Array_Copy(zoneData[ZD_rotation], g_ClientMenuState[param1][CMS_rotation], 3);
+			g_ClientMenuState[param1][CMS_editRotation] = true;
+			// Show box now
+			TriggerTimer(g_hShowZonesTimer, true);
+			DisplayZoneRotationMenu(param1);
 		}
 		// Change the name of the zone
 		else if(StrEqual(sInfo, "rename"))
@@ -602,10 +710,10 @@ DisplayPositionEditMenu(client)
 	AddMenuItem(hMenu, "save", "Save changes");
 	
 	AddMenuItem(hMenu, "ax", "Add to X axis");
-	AddMenuItem(hMenu, "ay", "Add to Y axis");
-	AddMenuItem(hMenu, "az", "Add to Z axis");
 	AddMenuItem(hMenu, "sx", "Subtract from X axis");
+	AddMenuItem(hMenu, "ay", "Add to Y axis");
 	AddMenuItem(hMenu, "sy", "Subtract from Y axis");
+	AddMenuItem(hMenu, "az", "Add to Z axis");
 	AddMenuItem(hMenu, "sz", "Subtract from Z axis");
 	
 	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
@@ -629,8 +737,9 @@ public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
 		if(StrEqual(sInfo, "save"))
 		{
 			SaveChangedZoneCoordinates(param1, zoneData);
+			Array_Copy(g_ClientMenuState[param1][CMS_rotation], zoneData[ZD_rotation], 3);
 			SaveZone(group, zoneData);
-			ApplyNewTriggerBounds(zoneData);
+			SetupZone(group, zoneData);
 			g_ClientMenuState[param1][CMS_editPosition] = false;
 			g_ClientMenuState[param1][CMS_editState] = ZES_first;
 			ResetZoneAddingState(param1);
@@ -659,6 +768,79 @@ public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
 		g_ClientMenuState[param1][CMS_editPosition] = false;
 		g_ClientMenuState[param1][CMS_editState] = ZES_first;
 		ResetZoneAddingState(param1);
+		if(param2 == MenuCancel_ExitBack)
+		{
+			DisplayZoneEditMenu(param1);
+		}
+		else
+		{
+			g_ClientMenuState[param1][CMS_zone] = -1;
+			g_ClientMenuState[param1][CMS_group] = -1;
+		}
+	}
+}
+
+DisplayZoneRotationMenu(client)
+{
+	new group[ZoneGroup], zoneData[ZoneData];
+	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
+	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
+	
+	new Handle:hMenu = CreateMenu(Menu_HandleZoneRotation);
+	SetMenuTitle(hMenu, "Rotate zone %s", zoneData[ZD_name]);
+	SetMenuExitBackButton(hMenu, true);
+	
+	AddMenuItem(hMenu, "", "Hold \"e\" and move your mouse to rotate the box.", ITEMDRAW_DISABLED);
+	AddMenuItem(hMenu, "", "Hold \"shift\" too, to rotate around a different axis when moving mouse up and down.", ITEMDRAW_DISABLED);
+	
+	AddMenuItem(hMenu, "save", "Save rotation");
+	AddMenuItem(hMenu, "reset", "Reset rotation");
+	AddMenuItem(hMenu, "discard", "Discard new rotation");
+	
+	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+}
+
+public Menu_HandleZoneRotation(Handle:menu, MenuAction:action, param1, param2)
+{
+	if(action == MenuAction_End)
+	{
+		CloseHandle(menu);
+	}
+	else if(action == MenuAction_Select)
+	{
+		new String:sInfo[32];
+		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		
+		new group[ZoneGroup], zoneData[ZoneData];
+		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
+		GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
+		
+		if(StrEqual(sInfo, "save"))
+		{
+			Array_Copy(g_ClientMenuState[param1][CMS_rotation], zoneData[ZD_rotation], 3);
+			SaveZone(group, zoneData);
+			SetupZone(group, zoneData);
+			g_ClientMenuState[param1][CMS_editRotation] = false;
+			Array_Fill(g_ClientMenuState[param1][CMS_rotation], 3, 0.0);
+			DisplayZoneEditMenu(param1);
+		}
+		else if(StrEqual(sInfo, "reset"))
+		{
+			Array_Fill(g_ClientMenuState[param1][CMS_rotation], 3, 0.0);
+			TriggerTimer(g_hShowZonesTimer, true);
+			DisplayZoneRotationMenu(param1);
+		}
+		else if(StrEqual(sInfo, "discard"))
+		{
+			Array_Fill(g_ClientMenuState[param1][CMS_rotation], 3, 0.0);
+			g_ClientMenuState[param1][CMS_editRotation] = false;
+			DisplayZoneEditMenu(param1);
+		}
+	}
+	else if(action == MenuAction_Cancel)
+	{
+		g_ClientMenuState[param1][CMS_editRotation] = false;
+		Array_Fill(g_ClientMenuState[param1][CMS_rotation], 3, 0.0);
 		if(param2 == MenuCancel_ExitBack)
 		{
 			DisplayZoneEditMenu(param1);
@@ -772,6 +954,9 @@ bool:LoadZoneGroup(group[ZoneGroup])
 		KvGetVector(hKV, "maxs", vBuf);
 		Array_Copy(vBuf, zoneData[ZD_maxs], 3);
 		
+		KvGetVector(hKV, "rotation", vBuf);
+		Array_Copy(vBuf, zoneData[ZD_rotation], 3);
+		
 		KvGetString(hKV, "name", sZoneName, sizeof(sZoneName), "unnamed");
 		strcopy(zoneData[ZD_name][0], MAX_ZONE_NAME, sZoneName);
 		
@@ -830,6 +1015,8 @@ bool:SaveZoneGroupToFile(group[ZoneGroup])
 		KvSetVector(hKV, "mins", vBuf);
 		Array_Copy(zoneData[ZD_maxs], vBuf, 3);
 		KvSetVector(hKV, "maxs", vBuf);
+		Array_Copy(zoneData[ZD_rotation], vBuf, 3);
+		KvSetVector(hKV, "rotation", vBuf);
 		KvSetString(hKV, "name", zoneData[ZD_name]);
 		
 		KvGoBack(hKV);
@@ -914,9 +1101,12 @@ bool:SetupZone(group[ZoneGroup], zoneData[ZoneData])
 	DispatchSpawn(iTrigger);
 	ActivateEntity(iTrigger);
 	
-	SetEntityModel(iTrigger, "models/error.mdl");
+	decl String:sModel[PLATFORM_MAX_PATH];
+	GetCurrentMap(sModel, sizeof(sModel));
+	Format(sModel, sizeof(sModel), "maps/%s.bsp", sModel);
+	SetEntityModel(iTrigger, sModel);
 	ApplyNewTriggerBounds(zoneData);
-	SetEntProp(iTrigger, Prop_Send, "m_nSolidType", 2);
+	//SetEntProp(iTrigger, Prop_Send, "m_nSolidType", 2);
 	
 	// Add the EF_NODRAW flag to keep the engine from trying to render the trigger.
 	new iEffects = GetEntProp(iTrigger, Prop_Send, "m_fEffects");
@@ -935,14 +1125,18 @@ ApplyNewTriggerBounds(zoneData[ZoneData])
 	if(iTrigger == INVALID_ENT_REFERENCE)
 		return;
 	
-	new Float:fPos[3];
+	new Float:fPos[3], Float:fAngles[3];
 	Array_Copy(zoneData[ZD_position], fPos, 3);
-	TeleportEntity(iTrigger, fPos, NULL_VECTOR, NULL_VECTOR);
+	Array_Copy(zoneData[ZD_rotation], fAngles, 3);
+	TeleportEntity(iTrigger, fPos, fAngles, NULL_VECTOR);
 
 	new Float:fMins[3], Float:fMaxs[3];
 	Array_Copy(zoneData[ZD_mins], fMins, 3);
 	Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
 	Entity_SetMinMaxSize(iTrigger, fMins, fMaxs);
+	
+	AcceptEntityInput(iTrigger, "Disable");
+	AcceptEntityInput(iTrigger, "Enable");
 }
 
 SetupAllGroupZones()
@@ -1044,6 +1238,10 @@ HandleZonePositionSetting(client, const Float:fOrigin[3])
 			}
 			else
 			{
+				// Setting one point is tricky when using rotations.
+				// We have to reset the rotation here.
+				Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
+			
 				// Show the new zone immediately
 				TriggerTimer(g_hShowZonesTimer, true);
 			}
@@ -1051,6 +1249,11 @@ HandleZonePositionSetting(client, const Float:fOrigin[3])
 		else if(g_ClientMenuState[client][CMS_editState] == ZES_second)
 		{
 			Array_Copy(fOrigin, g_ClientMenuState[client][CMS_second], 3);
+			
+			// Setting one point is tricky when using rotations.
+			// We have to reset the rotation here.
+			Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
+			
 			// Show the new zone immediately
 			TriggerTimer(g_hShowZonesTimer, true);
 			if(g_ClientMenuState[client][CMS_addZone])
@@ -1103,13 +1306,34 @@ SaveNewZone(client, const String:sName[])
 
 SaveChangedZoneCoordinates(client, zoneData[ZoneData])
 {
-	new Float:fMins[3], Float:fMaxs[3], Float:fPosition[3];
+	new Float:fMins[3], Float:fMaxs[3], Float:fPosition[3], Float:fAngles[3];
+	Array_Copy(g_ClientMenuState[client][CMS_rotation], fAngles, 3);
 	Array_Copy(g_ClientMenuState[client][CMS_first], fMins, 3);
 	Array_Copy(g_ClientMenuState[client][CMS_second], fMaxs, 3);
 	
-	// Have the trigger's bounding box be centered.
-	Vector_GetMiddleBetweenPoints(fMins, fMaxs, fPosition);
-	Array_Copy(fPosition, zoneData[ZD_position], 3);
+	new Float:fOldMins[3];
+	// Apply the rotation so we find the right middle, if there is rotation already.
+	if(!Math_VectorsEqual(fAngles, Float:{0.0,0.0,0.0}))
+	{
+		Array_Copy(zoneData[ZD_position], fPosition, 3);
+		SubtractVectors(fMins, fPosition, fMins);
+		SubtractVectors(fMaxs, fPosition, fMaxs);
+		Math_RotateVector(fMins, fAngles, fMins);
+		Math_RotateVector(fMaxs, fAngles, fMaxs);
+		AddVectors(fMins, fPosition, fMins);
+		AddVectors(fMaxs, fPosition, fMaxs);
+		
+		Vector_GetMiddleBetweenPoints(fMins, fMaxs, fPosition);
+		
+		fOldMins = fMins;
+		Array_Copy(g_ClientMenuState[client][CMS_first], fMins, 3);
+		Array_Copy(g_ClientMenuState[client][CMS_second], fMaxs, 3);
+	}
+	else
+	{
+		// Have the trigger's bounding box be centered.
+		Vector_GetMiddleBetweenPoints(fMins, fMaxs, fPosition);
+	}
 	
 	// Center mins and maxs around the root [0,0,0].
 	SubtractVectors(fMins, fPosition, fMins);
@@ -1126,6 +1350,21 @@ SaveChangedZoneCoordinates(client, zoneData[ZoneData])
 	
 	Array_Copy(fMins, zoneData[ZD_mins], 3);
 	Array_Copy(fMaxs, zoneData[ZD_maxs], 3);
+	
+	// Find the correct new middle position if the box has been rotated.
+	// We changed the mins/maxs relative to the rotated middle position..
+	// Get the new center position which is the correct center after rotation was applied.
+	// XXX: There might be an easier way?
+	if(!Math_VectorsEqual(fAngles, Float:{0.0,0.0,0.0}))
+	{
+		Math_RotateVector(fMins, fAngles, fMins);
+		AddVectors(fMins, fPosition, fMins);
+		SubtractVectors(fOldMins, fMins, fOldMins);
+		ScaleVector(fAngles, -1.0);
+		Math_RotateVector(fOldMins, fAngles, fOldMins);
+		AddVectors(fPosition, fOldMins, fPosition);
+	}
+	Array_Copy(fPosition, zoneData[ZD_position], 3);
 }
 
 GetFreeAutoZoneName(group[ZoneGroup], String:sBuffer[], maxlen)
