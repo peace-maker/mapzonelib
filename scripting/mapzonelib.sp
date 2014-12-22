@@ -1237,6 +1237,9 @@ bool:ZoneExistsWithName(group[ZoneGroup], const String:sZoneName[])
 	for(new i=0;i<iSize;i++)
 	{
 		GetZoneByIndex(i, group, zoneData);
+		if(zoneData[ZD_deleted])
+			continue;
+		
 		if(StrEqual(sZoneName, zoneData[ZD_name], false))
 			return true;
 	}
