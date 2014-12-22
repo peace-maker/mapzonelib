@@ -44,6 +44,8 @@ enum ClientMenuState {
 	Float:CMS_rotation[3]
 }
 
+new Handle:g_hCVDebugZones;
+
 new Handle:g_hfwdOnEnterForward;
 new Handle:g_hfwdOnLeaveForward;
 
@@ -83,6 +85,9 @@ public OnPluginStart()
 	g_hZoneGroups = CreateArray(_:ZoneGroup);
 	
 	LoadTranslations("common.phrases");
+	
+	g_hCVDebugZones = CreateConVar("sm_mapzone_debug", "0", "Debug mode. Show all zones by default.", _, true, 0.0, true, 1.0);
+	HookConVarChange(g_hCVDebugZones, ConVar_OnDebugChanged);
 	
 	HookEvent("round_start", Event_OnRoundStart);
 	HookEvent("bullet_impact", Event_OnBulletImpact);
@@ -260,6 +265,23 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 	return Plugin_Continue;
 }
 
+public ConVar_OnDebugChanged(Handle:convar, const String:oldValue[], const String:newValue[])
+{
+	new bool:bShowZones = GetConVarBool(g_hCVDebugZones);
+	new iSize = GetArraySize(g_hZoneGroups);
+	new group[ZoneGroup];
+	for(new i=0;i<iSize;i++)
+	{
+		GetGroupByIndex(i, group);
+		group[ZG_showZones] = bShowZones;
+		SaveGroup(group);
+	}
+	
+	// Show all zones immediately!
+	if(bShowZones)
+		TriggerTimer(g_hShowZonesTimer, true);
+}
+
 /**
  * Event callbacks
  */
@@ -297,7 +319,7 @@ public Native_RegisterZoneGroup(Handle:plugin, numParams)
 	new group[ZoneGroup];
 	strcopy(group[ZG_name][0], MAX_ZONE_GROUP_NAME, sName);
 	group[ZG_zones] = CreateArray(_:ZoneData);
-	group[ZG_showZones] = false;
+	group[ZG_showZones] = GetConVarBool(g_hCVDebugZones);
 	
 	// Load the zone details
 	LoadZoneGroup(group);
