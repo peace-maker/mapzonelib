@@ -107,6 +107,7 @@ public OnPluginStart()
 	
 	HookEvent("round_start", Event_OnRoundStart);
 	HookEvent("bullet_impact", Event_OnBulletImpact);
+	HookEvent("player_spawn", Event_OnPlayerSpawn);
 	HookEvent("player_death", Event_OnPlayerDeath);
 	
 	// Clear menu states
@@ -418,6 +419,40 @@ public Event_OnBulletImpact(Handle:event, const String:name[], bool:dontBroadcas
 	HandleZonePositionSetting(client, fOrigin);
 }
 
+public Event_OnPlayerSpawn(Handle:event, const String:name[], bool:dontBroadcast)
+{
+	new client = GetClientOfUserId(GetEventInt(event, "userid"));
+	if(!client)
+		return;
+	
+	// Check if the players are in one of the zones
+	// THIS IS HORRBILE, but the engine doesn't really spawn players on round_start
+	// if they were alive at the end of the previous round (at least in CS:S),
+	// so collision checks with triggers aren't run.
+	// Have them fire the leave callback on all zones they were in before respawning
+	// and have the "OnTrigger" output pickup the new touch.
+	new iNumGroups = GetArraySize(g_hZoneGroups);
+	new iNumZones, group[ZoneGroup], zoneData[ZoneData];
+	new iTrigger;
+	for(new i=0;i<iNumGroups;i++)
+	{
+		GetGroupByIndex(i, group);
+		iNumZones = GetArraySize(group[ZG_zones]);
+		for(new z=0;z<iNumZones;z++)
+		{
+			GetZoneByIndex(z, group, zoneData);
+			if(zoneData[ZD_deleted])
+				continue;
+			
+			iTrigger = EntRefToEntIndex(zoneData[ZD_triggerEntity]);
+			if(iTrigger == INVALID_ENT_REFERENCE)
+				continue;
+			
+			AcceptEntityInput(iTrigger, "EndTouch", client, client);
+		}
+	}
+}
+
 public Event_OnPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
 {
 	new client = GetClientOfUserId(GetEventInt(event, "userid"));
@@ -605,7 +640,7 @@ public Native_GetClusterZones(Handle:plugin, numParams)
  */
 public EntOut_OnTouchEvent(const String:output[], caller, activator, Float:delay)
 {
-	// Ignore dead players
+	// Ignore invalid touches
 	if(activator < 1 || activator > MaxClients)
 		return;
 
@@ -642,8 +677,24 @@ public EntOut_OnTouchEvent(const String:output[], caller, activator, Float:delay
 		return;
 	}
 	
+	new bool:bEnteredZone = StrEqual(output, "OnStartTouch") || StrEqual(output, "OnTrigger");
+	
 	// Remember this player interacted with this zone.
-	zoneData[ZD_clientInZone][activator] = StrEqual(output, "OnStartTouch");
+	// IT'S IMPORTANT TO MAKE SURE WE REALLY CALL OnEndTouch ON ALL POSSIBLE EVENTS.
+	if(bEnteredZone)
+	{
+		// He already is in this zone? Don't fire the callback twice.
+		if(zoneData[ZD_clientInZone][activator])
+			return;
+		zoneData[ZD_clientInZone][activator] = true;
+	}
+	else
+	{
+		// He wasn't in the zone already? Don't fire the callback twice.
+		if(!zoneData[ZD_clientInZone][activator])
+			return;
+		zoneData[ZD_clientInZone][activator] = false;
+	}
 	SaveZone(group, zoneData);
 	
 	// Is this zone part of a cluster?
@@ -657,7 +708,7 @@ public EntOut_OnTouchEvent(const String:output[], caller, activator, Float:delay
 		new bool:bFireForward;
 		
 		// Player entered a zone of this cluster.
-		if(StrEqual(output, "OnStartTouch"))
+		if(bEnteredZone)
 		{
 			// This is the first zone of the cluster he enters.
 			// Fire the forward with the cluster name instead of the zone name.
@@ -694,7 +745,7 @@ public EntOut_OnTouchEvent(const String:output[], caller, activator, Float:delay
 	}
 	
 	// Inform other plugins, that someone entered or left this zone/cluster.
-	if(StrEqual(output, "OnStartTouch"))
+	if(bEnteredZone)
 		Call_StartForward(g_hfwdOnEnterForward);
 	else
 		Call_StartForward(g_hfwdOnLeaveForward);
@@ -2016,6 +2067,7 @@ bool:SetupZone(group[ZoneGroup], zoneData[ZoneData])
 	SetEntProp(iTrigger, Prop_Send, "m_fEffects", iEffects);
 
 	HookSingleEntityOutput(iTrigger, "OnStartTouch", EntOut_OnTouchEvent);
+	HookSingleEntityOutput(iTrigger, "OnTrigger", EntOut_OnTouchEvent);
 	HookSingleEntityOutput(iTrigger, "OnEndTouch", EntOut_OnTouchEvent);
 	
 	return true;
@@ -2055,13 +2107,25 @@ SetupAllGroupZones()
 RemoveZoneTrigger(group[ZoneGroup], zoneData[ZoneData])
 {
 	new iTrigger = EntRefToEntIndex(zoneData[ZD_triggerEntity]);
-	zoneData[ZD_triggerEntity] = INVALID_ENT_REFERENCE;
-	SaveZone(group, zoneData);
-	
 	if(iTrigger == INVALID_ENT_REFERENCE)
 		return;
 	
-	// TODO: Fire leave callback for all touching clients.
+	// Fire leave callback for all touching clients.
+	for(new i=1;i<=MaxClients;i++)
+	{
+		if(!IsClientInGame(i))
+			continue;
+		
+		if(!zoneData[ZD_clientInZone][i])
+			continue;
+		
+		// Make all players leave this zone. It's gone now.
+		AcceptEntityInput(iTrigger, "EndTouch", i, i);
+	}
+	
+	zoneData[ZD_triggerEntity] = INVALID_ENT_REFERENCE;
+	SaveZone(group, zoneData);
+	
 	AcceptEntityInput(iTrigger, "Kill");
 }
 
@@ -2189,7 +2253,7 @@ RemoveClientFromAllZones(client)
 			if(zoneData[ZD_triggerEntity] == INVALID_ENT_REFERENCE)
 				continue;
 			
-			EntOut_OnTouchEvent("OnEndTouch", EntRefToEntIndex(zoneData[ZD_triggerEntity]), client, 0.0);
+			AcceptEntityInput(EntRefToEntIndex(zoneData[ZD_triggerEntity]), "EndTouch", client, client);
 		}
 	}
 }
