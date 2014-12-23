@@ -1071,6 +1071,8 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 			
 			g_ClientMenuState[param1][CMS_cluster] = -1;
 			DisplayClusterListMenu(param1);
+			
+			LogAction(param1, -1, "%L deleted cluster \"%s\" from group \"%s\".", param1, zoneCluster[ZC_name], group[ZG_name]);
 		}
 		else
 		{
@@ -1325,12 +1327,16 @@ public Panel_HandleConfirmRemoveFromCluster(Handle:menu, MenuAction:action, para
 		// Selected "Yes" -> remove zone from cluster.
 		if(param2 == 1)
 		{
-			new group[ZoneGroup], zoneData[ZoneData];
+			new group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
 			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 			GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
+			if(zoneData[ZD_clusterIndex] != -1)
+				GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
 			
 			zoneData[ZD_clusterIndex] = -1;
 			SaveZone(group, zoneData);
+			
+			LogAction(param1, -1, "%L removed zone \"%s\" from cluster \"%s\" in group \"%s\".", param1, zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
 		}
 		
 		DisplayZoneEditMenu(param1);
@@ -1360,10 +1366,20 @@ public Panel_HandleConfirmDeleteZone(Handle:menu, MenuAction:action, param1, par
 			RemoveZoneTrigger(group, zoneData);
 			g_ClientMenuState[param1][CMS_zone] = -1;
 			
+			
 			if(g_ClientMenuState[param1][CMS_cluster] == -1)
+			{
+				LogAction(param1, -1, "%L deleted zone \"%s\" of group \"%s\".", param1, zoneData[ZD_name], group[ZG_name]);
 				DisplayGroupRootMenu(param1, group);
+			}
 			else
+			{
+				new zoneCluster[ZoneCluster];
+				if(zoneData[ZD_clusterIndex] != -1)
+					GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
+				LogAction(param1, -1, "%L deleted zone \"%s\" from cluster \"%s\" of group \"%s\".", param1, zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
 				DisplayClusterEditMenu(param1);
+			}
 		}
 		else
 		{
@@ -1864,6 +1880,9 @@ bool:SetupZone(group[ZoneGroup], zoneData[ZoneData])
 	DispatchSpawn(iTrigger);
 	ActivateEntity(iTrigger);
 	
+	// Get map "model" to create "true" brush.
+	// Only with the model set to the map, the brush 
+	// uses the rotation in its collision checks.
 	decl String:sModel[PLATFORM_MAX_PATH];
 	GetCurrentMap(sModel, sizeof(sModel));
 	Format(sModel, sizeof(sModel), "maps/%s.bsp", sModel);
@@ -2086,11 +2105,11 @@ SaveNewZone(client, const String:sName[])
 	zoneData[ZD_index] = GetArraySize(group[ZG_zones]);
 	PushArrayArray(group[ZG_zones], zoneData[0], _:ZoneData);
 	
+	new zoneCluster[ZoneCluster];
 	if(g_ClientMenuState[client][CMS_cluster] == -1)
 		PrintToChat(client, "Map Zones > Added new zone \"%s\" to group \"%s\".", sName, group[ZG_name]);
 	else
 	{
-		new zoneCluster[ZoneCluster];
 		GetZoneClusterByIndex(g_ClientMenuState[client][CMS_cluster], group, zoneCluster);
 		PrintToChat(client, "Map Zones > Added new zone \"%s\" to cluster \"%s\" in group \"%s\".", sName, zoneCluster[ZC_name], group[ZG_name]);
 	}
@@ -2099,6 +2118,11 @@ SaveNewZone(client, const String:sName[])
 	// Create the trigger.
 	if(!SetupZone(group, zoneData))
 		PrintToChat(client, "Map Zones > Error creating trigger for new zone.");
+	
+	if(g_ClientMenuState[client][CMS_cluster] != -1)
+		LogAction(client, -1, "%L created a new zone in cluster \"%s\" of group \"%s\" called \"%s\" at [%f,%f,%f]", client, zoneCluster[ZC_name], group[ZG_name], zoneData[ZD_name], zoneData[ZD_position][0], zoneData[ZD_position][1], zoneData[ZD_position][2]);
+	else
+		LogAction(client, -1, "%L created a new zone in%s group \"%s\" called \"%s\" at [%f,%f,%f]", client, group[ZG_name], zoneData[ZD_name], zoneData[ZD_position][0], zoneData[ZD_position][1], zoneData[ZD_position][2]);
 	
 	// Edit the new zone right away.
 	g_ClientMenuState[client][CMS_zone] = zoneData[ZD_index];
