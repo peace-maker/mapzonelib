@@ -6,7 +6,6 @@
 #define PLUGIN_VERSION "1.0"
 
 #define MAX_ZONE_GROUP_NAME 64
-#define MAX_ZONE_NAME 64
 
 enum ZoneData {
 	ZD_index,
@@ -85,6 +84,9 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 	CreateNative("MapZone_RegisterZoneGroup", Native_RegisterZoneGroup);
 	CreateNative("MapZone_ShowMenu", Native_ShowMenu);
 	CreateNative("MapZone_SetMenuBackAction", Native_SetMenuBackAction);
+	CreateNative("MapZone_GetGroupZones", Native_GetGroupZones);
+	CreateNative("MapZone_IsClusteredZone", Native_IsClusteredZone);
+	CreateNative("MapZone_GetClusterZones", Native_GetClusterZones);
 	RegPluginLibrary("mapzonelib");
 	return APLRes_Success;
 }
@@ -482,6 +484,116 @@ public Native_SetMenuBackAction(Handle:plugin, numParams)
 	SaveGroup(group);
 	
 	return true;
+}
+
+// native Handle:MapZone_GetGroupZones(const String:group[], bool:bIncludeClusters=true);
+public Native_GetGroupZones(Handle:plugin, numParams)
+{
+	new String:sName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sName, sizeof(sName));
+	
+	new bool:bIncludeClusters = bool:GetNativeCell(2);
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sName, group))
+		return _:INVALID_HANDLE;
+	
+	new Handle:hZones = CreateArray(ByteCountToCells(MAX_ZONE_NAME));
+	// Push all regular zone names
+	new iSize = GetArraySize(group[ZG_zones]);
+	new zoneData[ZoneData];
+	for(new i=0;i<iSize;i++)
+	{
+		GetZoneByIndex(i, group, zoneData);
+		if(zoneData[ZD_deleted])
+			continue;
+		
+		// NOT in a cluster!
+		if(zoneData[ZD_clusterIndex] != -1)
+			continue;
+		
+		PushArrayArray(hZones, zoneData[ZD_name], ByteCountToCells(MAX_ZONE_NAME));
+	}
+	
+	// Only add clusters, if we're told so.
+	if(bIncludeClusters)
+	{
+		// And all clusters
+		new zoneCluster[ZoneCluster];
+		iSize = GetArraySize(group[ZG_cluster]);
+		for(new i=0;i<iSize;i++)
+		{
+			GetZoneClusterByIndex(i, group, zoneCluster);
+			if(zoneCluster[ZC_deleted])
+				continue;
+			
+			PushArrayArray(hZones, zoneCluster[ZC_name], ByteCountToCells(MAX_ZONE_NAME));
+		}
+	}
+	
+	new Handle:hReturn = CloneHandle(hZones, plugin);
+	CloseHandle(hZones);
+	
+	return _:hReturn;
+}
+
+// native bool:MapZone_IsClusteredZone(const String:group[], const String:zoneName[]);
+public Native_IsClusteredZone(Handle:plugin, numParams)
+{
+	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	new String:sZoneName[MAX_ZONE_NAME];
+	GetNativeString(2, sZoneName, sizeof(sZoneName));
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+		return false;
+	
+	if(ClusterExistsWithName(group, sZoneName))
+		return true;
+	
+	return false;
+}
+
+// native Handle:MapZone_GetClusterZones(const String:group[], const String:clusterName[]);
+public Native_GetClusterZones(Handle:plugin, numParams)
+{
+	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	new String:sClusterName[MAX_ZONE_NAME];
+	GetNativeString(2, sClusterName, sizeof(sClusterName));
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+		return _:INVALID_HANDLE;
+	
+	new zoneCluster[ZoneCluster];
+	if(!GetZoneClusterByName(sClusterName, group))
+		return _:INVALID_HANDLE;
+	
+	new Handle:hZones = CreateArray(ByteCountToCells(MAX_ZONE_NAME));
+	// Push all names of zones in this cluster
+	new iSize = GetArraySize(group[ZG_zones]);
+	new zoneData[ZoneData];
+	for(new i=0;i<iSize;i++)
+	{
+		GetZoneByIndex(i, group, zoneData);
+		if(zoneData[ZD_deleted])
+			continue;
+		
+		// In this cluster?
+		if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
+			continue;
+		
+		PushArrayArray(hZones, zoneData[ZD_name], ByteCountToCells(MAX_ZONE_NAME));
+	}
+	
+	new Handle:hReturn = CloneHandle(hZones, plugin);
+	CloseHandle(hZones);
+	
+	return _:hReturn;
 }
 
 /**
@@ -2010,6 +2122,19 @@ bool:ZoneExistsWithName(group[ZoneGroup], const String:sZoneName[])
 GetZoneClusterByIndex(iIndex, group[ZoneGroup], zoneCluster[ZoneCluster])
 {
 	GetArrayArray(group[ZG_cluster], iIndex, zoneCluster[0], _:ZoneCluster);
+}
+
+bool:GetZoneClusterByName(const String:sName[], group[ZoneGroup])
+{
+	new iSize = GetArraySize(group[ZG_cluster]);
+	new zoneCluster[ZoneCluster];
+	for(new i=0;i<iSize;i++)
+	{
+		GetZoneClusterByIndex(i, group, zoneCluster);
+		if(StrEqual(zoneCluster[ZC_name], sName, false))
+			return true;
+	}
+	return false;
 }
 
 SaveCluster(group[ZoneGroup], zoneCluster[ZoneCluster])

@@ -4,6 +4,11 @@
 #define _mapzonelib_included
 
 /**
+ * Maximal length of a zone's name.
+ */
+#define MAX_ZONE_NAME 64
+
+/**
  * Register a new group of zones.
  * Zones created in this group will be saved in a 
  * seperate folder in "configs/mapzonelib/<group>/mapname.zones".
@@ -50,6 +55,40 @@ functag public MapZoneMenuBackCB(client, const String:group[]);
 native bool:MapZone_SetMenuBackAction(const String:group[], MapZoneMenuBackCB:callback);
 
 /**
+ * Get an adt_array of zone (and cluster) names of this group.
+ * Zone names are at most MAX_ZONE_NAME long.
+ * 
+ * You have to close the handle using CloseHandle after use.
+ *
+ * @param group             The zone group name.
+ * @param bIncludeClusters  Include clustered zones in this list?
+ * @return                  Handle to adt_array containing zone and cluster names
+ *                          or INVALID_HANDLE if group doesn't exist.
+ */
+native Handle:MapZone_GetGroupZones(const String:group[], bool:bIncludeClusters=true);
+
+/**
+ * Check if a zone is made of several smaller zones.
+ *
+ * @param group    The zone group name.
+ * @param zoneName The name of the zone to check for clustering.
+ * @return         True if zone is a cluster, false otherwise.
+ */
+native bool:MapZone_IsClusteredZone(const String:group[], const String:zoneName[]);
+
+/**
+ * Get an adt_array of zone names of zones in this cluster.
+ * Zone names are at most MAX_ZONE_NAME long.
+ * You have to close the handle using CloseHandle after use.
+ *
+ * @param group        The zone group name.
+ * @param clusterName  The cluster name.
+ * @return             Handle to adt_array containing zone names 
+ *                     or INVALID_HANDLE if group or cluster doesn't exist.
+ */
+native Handle:MapZone_GetClusterZones(const String:group[], const String:clusterName[]);
+
+/**
  * Called when a client enteres a zone.
  * 
  * @param client      The client index.
@@ -86,5 +125,8 @@ public __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_RegisterZoneGroup");
 	MarkNativeAsOptional("MapZone_ShowMenu");
 	MarkNativeAsOptional("MapZone_SetMenuBackAction");
+	MarkNativeAsOptional("MapZone_GetGroupZones");
+	MarkNativeAsOptional("MapZone_IsClusteredZone");
+	MarkNativeAsOptional("MapZone_GetClusterZones");
 }
 #endif
