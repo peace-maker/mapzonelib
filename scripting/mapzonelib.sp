@@ -7,6 +7,8 @@
 
 #define MAX_ZONE_GROUP_NAME 64
 
+#define XYZ(%1) %1[0], %1[1], %1[2]
+
 enum ZoneData {
 	ZD_index,
 	ZD_triggerEntity,
@@ -17,7 +19,8 @@ enum ZoneData {
 	Float:ZD_rotation[3],
 	bool:ZD_deleted, // We can't directly delete zones, because we use the array index as identifier. Deleting would mean an array shiftup.
 	bool:ZD_clientInZone[MAXPLAYERS+1], // List of clients in this zone.
-	String:ZD_name[MAX_ZONE_NAME]
+	String:ZD_name[MAX_ZONE_NAME],
+	String:ZD_triggerModel[PLATFORM_MAX_PATH] // Name of the brush model of the trigger which fits this zone best.
 }
 
 enum ZoneCluster {
@@ -473,6 +476,10 @@ public Native_RegisterZoneGroup(Handle:plugin, numParams)
 	GetNativeString(1, sName, sizeof(sName));
 	
 	new group[ZoneGroup];
+	// See if there already is a group with that name
+	if(GetGroupByName(sName, group))
+		return;
+	
 	strcopy(group[ZG_name][0], MAX_ZONE_GROUP_NAME, sName);
 	group[ZG_zones] = CreateArray(_:ZoneData);
 	group[ZG_cluster] = CreateArray(_:ZoneCluster);
@@ -889,6 +896,9 @@ DisplayGroupRootMenu(client, group[ZoneGroup])
 	
 	g_ClientMenuState[client][CMS_group] = group[ZG_index];
 	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+	
+	// We might have interrupted one of our own menus which cancelled and unset our group state :(
+	g_ClientMenuState[client][CMS_group] = group[ZG_index];
 }
 
 public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
@@ -1606,6 +1616,7 @@ public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
 		{
 			SaveChangedZoneCoordinates(param1, zoneData);
 			Array_Copy(g_ClientMenuState[param1][CMS_rotation], zoneData[ZD_rotation], 3);
+			zoneData[ZD_triggerModel][0] = '\0';
 			SaveZone(group, zoneData);
 			SetupZone(group, zoneData);
 			g_ClientMenuState[param1][CMS_editPosition] = false;
@@ -1800,7 +1811,8 @@ public Menu_HandleAddFinalization(Handle:menu, MenuAction:action, param1, param2
 				DisplayGroupRootMenu(param1, group);
 			}
 		}
-		else
+		// Only reset state, if we didn't type a name in chat!
+		else if(g_ClientMenuState[param1][CMS_zone] == -1)
 		{
 			g_ClientMenuState[param1][CMS_group] = -1;
 			g_ClientMenuState[param1][CMS_cluster] = -1;
@@ -1931,7 +1943,7 @@ bool:SaveZoneGroupToFile(group[ZoneGroup])
 		KvSetString(hKV, "name", zoneCluster[ZC_name]);
 		
 		// Run through all zones and add the ones that belong to this cluster.
-		bZonesAdded = CreateZoneSectionsInKV(hKV, group, zoneCluster[ZC_index]);
+		bZonesAdded |= CreateZoneSectionsInKV(hKV, group, zoneCluster[ZC_index]);
 		
 		KvGoBack(hKV);
 	}
@@ -2045,21 +2057,29 @@ bool:SetupZone(group[ZoneGroup], zoneData[ZoneData])
 	// Make sure any old trigger is gone.
 	RemoveZoneTrigger(group, zoneData);
 	
+	// Get "model" of one of the present brushes in the map.
+	// Only those models (and the map .bsp itself) are accepted as brush models.
+	// Only brush models get the BSP solid type and so traces check rotation too.
+	FindSmallestExistingEncapsulatingTrigger(zoneData);
+	DispatchKeyValue(iTrigger, "model", zoneData[ZD_triggerModel]);
+
+	
 	zoneData[ZD_triggerEntity] = EntIndexToEntRef(iTrigger);
 	SaveZone(group, zoneData);
 	
 	DispatchSpawn(iTrigger);
 	ActivateEntity(iTrigger);
 	
-	// Get map "model" to create "true" brush.
-	// Only with the model set to the map, the brush 
-	// uses the rotation in its collision checks.
-	decl String:sModel[PLATFORM_MAX_PATH];
-	GetCurrentMap(sModel, sizeof(sModel));
-	Format(sModel, sizeof(sModel), "maps/%s.bsp", sModel);
-	SetEntityModel(iTrigger, sModel);
+	new Float:fRotation[3];
+	Array_Copy(zoneData[ZD_rotation], fRotation, 3);
+	
+	// If trigger is rotated consider rotation in traces
+	if(!Math_VectorsEqual(fRotation, Float:{0.0,0.0,0.0}))
+		Entity_SetSolidType(iTrigger, SOLID_BSP);
+	else
+		Entity_SetSolidType(iTrigger, SOLID_BBOX);
+		
 	ApplyNewTriggerBounds(zoneData);
-	//SetEntProp(iTrigger, Prop_Send, "m_nSolidType", 2);
 	
 	// Add the EF_NODRAW flag to keep the engine from trying to render the trigger.
 	new iEffects = GetEntProp(iTrigger, Prop_Send, "m_fEffects");
@@ -2091,6 +2111,78 @@ ApplyNewTriggerBounds(zoneData[ZoneData])
 	
 	AcceptEntityInput(iTrigger, "Disable");
 	AcceptEntityInput(iTrigger, "Enable");
+}
+
+FindSmallestExistingEncapsulatingTrigger(zoneData[ZoneData])
+{
+	// Already found a model. Just use it.
+	if(zoneData[ZD_triggerModel][0] != 0)
+		return;
+
+	new Float:vMins[3], Float:vMaxs[3];
+	new Float:fLength, Float:vDiag[3];
+	GetEntPropVector(0, Prop_Data, "m_WorldMins", vMins);
+	GetEntPropVector(0, Prop_Data, "m_WorldMaxs", vMaxs);
+	
+	SubtractVectors(vMins, vMaxs, vDiag);
+	fLength = GetVectorLength(vDiag);
+	
+	//LogMessage("World mins [%f,%f,%f] maxs [%f,%f,%f] diag length %f", XYZ(vMins), XYZ(vMaxs), fLength);
+	
+	// The map itself would be always large enough - but often it's way too large!
+	new Float:fSmallestLength = fLength;
+	GetCurrentMap(zoneData[ZD_triggerModel], sizeof(zoneData[ZD_triggerModel]));
+	Format(zoneData[ZD_triggerModel], sizeof(zoneData[ZD_triggerModel]), "maps/%s.bsp", zoneData[ZD_triggerModel]);
+
+	new iMaxEnts = GetEntityCount();
+	new String:sModel[256], String:sClassname[256], String:sName[64];
+	new bool:bLargeEnough;
+	for(new i=MaxClients+1;i<iMaxEnts;i++)
+	{
+		if(!IsValidEntity(i))
+			continue;
+		
+		// Only care for brushes
+		Entity_GetModel(i, sModel, sizeof(sModel));
+		if(sModel[0] != '*')
+			continue;
+		
+		// Seems like only trigger brush models work as expected with .. triggers.
+		Entity_GetClassName(i, sClassname, sizeof(sClassname));
+		if(StrContains(sClassname, "trigger_") != 0)
+			continue;
+		
+		// Don't count zones created by ourselves :P
+		Entity_GetName(i, sName, sizeof(sName));
+		if(!StrContains(sName, "mapzonelib_"))
+			continue;
+		
+		Entity_GetMinSize(i, vMins);
+		Entity_GetMaxSize(i, vMaxs);
+		
+		SubtractVectors(vMins, vMaxs, vDiag);
+		fLength = GetVectorLength(vDiag);
+		
+		bLargeEnough = true;
+		for(new v=0;v<3;v++)
+		{
+			if(vMins[v] > zoneData[ZD_mins][v]
+			|| vMaxs[v] < zoneData[ZD_maxs][v])
+			{
+				bLargeEnough = false;
+				break;
+			}
+		}
+		if(bLargeEnough && fLength < fSmallestLength)
+		{
+			fSmallestLength = fLength;
+			strcopy(zoneData[ZD_triggerModel], sizeof(zoneData[ZD_triggerModel]), sModel);
+		}
+		
+		//LogMessage("%s (%s) #%d: model \"%s\" mins [%f,%f,%f] maxs [%f,%f,%f] diag length %f", sClassname, sName, i, sModel, XYZ(vMins), XYZ(vMaxs), fLength);
+	}
+	
+	//LogMessage("Smallest entity which encapsulates zone %s is %s with diagonal length %f.", zoneData[ZD_name], zoneData[ZD_triggerModel], fSmallestLength);
 }
 
 SetupAllGroupZones()
@@ -2309,14 +2401,15 @@ HandleZonePositionSetting(client, const Float:fOrigin[3])
 			// We have to reset the rotation here.
 			Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
 			
-			// Show the new zone immediately
-			TriggerTimer(g_hShowZonesTimer, true);
 			if(g_ClientMenuState[client][CMS_addZone])
 			{
 				g_ClientMenuState[client][CMS_editState] = ZES_name;
 				DisplayZoneAddFinalizationMenu(client);
 				PrintToChat(client, "Map Zones > Please type a name for this zone in chat. Type \"!abort\" to abort.");
 			}
+			
+			// Show the new zone immediately
+			TriggerTimer(g_hShowZonesTimer, true);
 		}
 	}
 }
