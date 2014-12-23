@@ -16,6 +16,7 @@ enum ZoneData {
 	Float:ZD_maxs[3],
 	Float:ZD_rotation[3],
 	bool:ZD_deleted, // We can't directly delete zones, because we use the array index as identifier. Deleting would mean an array shiftup.
+	bool:ZD_clientInZone[MAXPLAYERS+1], // List of clients in this zone.
 	String:ZD_name[MAX_ZONE_NAME]
 }
 
@@ -106,6 +107,7 @@ public OnPluginStart()
 	
 	HookEvent("round_start", Event_OnRoundStart);
 	HookEvent("bullet_impact", Event_OnBulletImpact);
+	HookEvent("player_death", Event_OnPlayerDeath);
 	
 	// Clear menu states
 	for(new i=1;i<=MaxClients;i++)
@@ -170,21 +172,12 @@ public OnClientDisconnect(client)
 	Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
 	ResetZoneAddingState(client);
 	
+	// If he was in some zone, guarantee to call the leave callback.
+	RemoveClientFromAllZones(client);
+	
 	// Client is no longer in any clusters.
-	new iNumGroups = GetArraySize(g_hZoneGroups);
-	new iNumClusters, group[ZoneGroup], zoneCluster[ZoneCluster];
-	for(new i=0;i<iNumGroups;i++)
-	{
-		GetGroupByIndex(i, group);
-		iNumClusters = GetArraySize(group[ZG_cluster]);
-		for(new c=0;c<iNumClusters;c++)
-		{
-			GetZoneClusterByIndex(c, group, zoneCluster);
-			// TODO: Maybe fire leave callback in clusters he's still in?
-			zoneCluster[ZC_clientInZones][client] = 0;
-			SaveCluster(group, zoneCluster);
-		}
-	}
+	// Just to make sure.
+	RemoveClientFromAllClusters(client);
 }
 
 public OnClientSayCommand_Post(client, const String:command[], const String:sArgs[])
@@ -407,9 +400,12 @@ public Event_OnRoundStart(Handle:event, const String:name[], bool:dontBroadcast)
 	SetupAllGroupZones();
 }
 
-public Action:Event_OnBulletImpact(Handle:event, const String:name[], bool:dontBroadcast)
+public Event_OnBulletImpact(Handle:event, const String:name[], bool:dontBroadcast)
 {
 	new client = GetClientOfUserId(GetEventInt(event, "userid"));
+	if(!client)
+		return;
+	
 	new Float:x = GetEventFloat(event, "x");
 	new Float:y = GetEventFloat(event, "y");
 	new Float:z = GetEventFloat(event, "z");
@@ -420,8 +416,16 @@ public Action:Event_OnBulletImpact(Handle:event, const String:name[], bool:dontB
 	fOrigin[2] = z;
 	
 	HandleZonePositionSetting(client, fOrigin);
+}
+
+public Event_OnPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
+{
+	new client = GetClientOfUserId(GetEventInt(event, "userid"));
+	if(!client)
+		return;
 	
-	return Plugin_Continue;
+	// Dead players are in no zones anymore.
+	RemoveClientFromAllZones(client);
 }
 
 /**
@@ -602,7 +606,7 @@ public Native_GetClusterZones(Handle:plugin, numParams)
 public EntOut_OnTouchEvent(const String:output[], caller, activator, Float:delay)
 {
 	// Ignore dead players
-	if(activator < 1 || activator > MaxClients || !IsPlayerAlive(activator))
+	if(activator < 1 || activator > MaxClients)
 		return;
 
 	// Get the targetname
@@ -637,6 +641,10 @@ public EntOut_OnTouchEvent(const String:output[], caller, activator, Float:delay
 		AcceptEntityInput(caller, "Kill");
 		return;
 	}
+	
+	// Remember this player interacted with this zone.
+	zoneData[ZD_clientInZone][activator] = StrEqual(output, "OnStartTouch");
+	SaveZone(group, zoneData);
 	
 	// Is this zone part of a cluster?
 	new String:sZoneName[MAX_ZONE_NAME];
@@ -2053,6 +2061,7 @@ RemoveZoneTrigger(group[ZoneGroup], zoneData[ZoneData])
 	if(iTrigger == INVALID_ENT_REFERENCE)
 		return;
 	
+	// TODO: Fire leave callback for all touching clients.
 	AcceptEntityInput(iTrigger, "Kill");
 }
 
@@ -2156,6 +2165,51 @@ bool:ClusterExistsWithName(group[ZoneGroup], const String:sClusterName[])
 			return true;
 	}
 	return false;
+}
+
+RemoveClientFromAllZones(client)
+{
+	new iNumGroups = GetArraySize(g_hZoneGroups);
+	new iNumZones, group[ZoneGroup], zoneData[ZoneData];
+	for(new i=0;i<iNumGroups;i++)
+	{
+		GetGroupByIndex(i, group);
+		iNumZones = GetArraySize(group[ZG_zones]);
+		for(new z=0;z<iNumZones;z++)
+		{
+			GetZoneByIndex(z, group, zoneData);
+			if(zoneData[ZD_deleted])
+				continue;
+			
+			// Not in this zone?
+			if(!zoneData[ZD_clientInZone][client])
+				continue;
+			
+			// No trigger on the map?
+			if(zoneData[ZD_triggerEntity] == INVALID_ENT_REFERENCE)
+				continue;
+			
+			EntOut_OnTouchEvent("OnEndTouch", EntRefToEntIndex(zoneData[ZD_triggerEntity]), client, 0.0);
+		}
+	}
+}
+
+RemoveClientFromAllClusters(client)
+{
+	new iNumGroups = GetArraySize(g_hZoneGroups);
+	new iNumClusters, group[ZoneGroup], zoneCluster[ZoneCluster];
+	for(new i=0;i<iNumGroups;i++)
+	{
+		GetGroupByIndex(i, group);
+		iNumClusters = GetArraySize(group[ZG_cluster]);
+		for(new c=0;c<iNumClusters;c++)
+		{
+			GetZoneClusterByIndex(c, group, zoneCluster);
+			// TODO: Maybe fire leave callback in clusters he's still in?
+			zoneCluster[ZC_clientInZones][client] = 0;
+			SaveCluster(group, zoneCluster);
+		}
+	}
 }
 
 /**
