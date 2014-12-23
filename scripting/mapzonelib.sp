@@ -1728,14 +1728,14 @@ bool:SaveZoneGroupToFile(group[ZoneGroup])
 	BuildPath(Path_SM, sPath, sizeof(sPath),  "configs/mapzonelib");
 	if(!DirExists(sPath))
 	{
-		if(!CreateDirectory(sPath, 0775))
+		if(!CreateDirectory(sPath, 509)) // mode 0775
 			return false;
 	}
 	
 	BuildPath(Path_SM, sPath, sizeof(sPath), "configs/mapzonelib/%s", group[ZG_name]);
 	if(!DirExists(sPath))
 	{
-		if(!CreateDirectory(sPath, 0775))
+		if(!CreateDirectory(sPath, 509))
 			return false;
 	}
 	
@@ -2122,7 +2122,7 @@ SaveNewZone(client, const String:sName[])
 	if(g_ClientMenuState[client][CMS_cluster] != -1)
 		LogAction(client, -1, "%L created a new zone in cluster \"%s\" of group \"%s\" called \"%s\" at [%f,%f,%f]", client, zoneCluster[ZC_name], group[ZG_name], zoneData[ZD_name], zoneData[ZD_position][0], zoneData[ZD_position][1], zoneData[ZD_position][2]);
 	else
-		LogAction(client, -1, "%L created a new zone in%s group \"%s\" called \"%s\" at [%f,%f,%f]", client, group[ZG_name], zoneData[ZD_name], zoneData[ZD_position][0], zoneData[ZD_position][1], zoneData[ZD_position][2]);
+		LogAction(client, -1, "%L created a new zone in group \"%s\" called \"%s\" at [%f,%f,%f]", client, group[ZG_name], zoneData[ZD_name], zoneData[ZD_position][0], zoneData[ZD_position][1], zoneData[ZD_position][2]);
 	
 	// Edit the new zone right away.
 	g_ClientMenuState[client][CMS_zone] = zoneData[ZD_index];
