@@ -2309,7 +2309,7 @@ SaveCluster(group[ZoneGroup], zoneCluster[ZoneCluster])
 
 bool:ClusterExistsWithName(group[ZoneGroup], const String:sClusterName[])
 {
-	new iSize = GetArraySize(group[ZG_zones]);
+	new iSize = GetArraySize(group[ZG_cluster]);
 	new zoneCluster[ZoneCluster];
 	for(new i=0;i<iSize;i++)
 	{
