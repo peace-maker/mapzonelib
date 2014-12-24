@@ -2057,11 +2057,22 @@ bool:SetupZone(group[ZoneGroup], zoneData[ZoneData])
 	// Make sure any old trigger is gone.
 	RemoveZoneTrigger(group, zoneData);
 	
+	new Float:fRotation[3];
+	Array_Copy(zoneData[ZD_rotation], fRotation, 3);
+	new bool:bIsRotated = !Math_VectorsEqual(fRotation, Float:{0.0,0.0,0.0});
+	
 	// Get "model" of one of the present brushes in the map.
 	// Only those models (and the map .bsp itself) are accepted as brush models.
 	// Only brush models get the BSP solid type and so traces check rotation too.
-	FindSmallestExistingEncapsulatingTrigger(zoneData);
-	DispatchKeyValue(iTrigger, "model", zoneData[ZD_triggerModel]);
+	if(bIsRotated)
+	{
+		FindSmallestExistingEncapsulatingTrigger(zoneData);
+		DispatchKeyValue(iTrigger, "model", zoneData[ZD_triggerModel]);
+	}
+	else
+	{
+		DispatchKeyValue(iTrigger, "model", "models/error.mdl");
+	}
 
 	
 	zoneData[ZD_triggerEntity] = EntIndexToEntRef(iTrigger);
@@ -2070,11 +2081,8 @@ bool:SetupZone(group[ZoneGroup], zoneData[ZoneData])
 	DispatchSpawn(iTrigger);
 	ActivateEntity(iTrigger);
 	
-	new Float:fRotation[3];
-	Array_Copy(zoneData[ZD_rotation], fRotation, 3);
-	
 	// If trigger is rotated consider rotation in traces
-	if(!Math_VectorsEqual(fRotation, Float:{0.0,0.0,0.0}))
+	if(bIsRotated)
 		Entity_SetSolidType(iTrigger, SOLID_BSP);
 	else
 		Entity_SetSolidType(iTrigger, SOLID_BBOX);
