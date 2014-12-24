@@ -36,6 +36,7 @@ enum ZoneGroup {
 	Handle:ZG_cluster,
 	Handle:ZG_menuBackForward,
 	bool:ZG_showZones,
+	bool:ZG_adminShowZones[MAXPLAYERS+1],
 	String:ZG_name[MAX_ZONE_GROUP_NAME]
 }
 
@@ -179,9 +180,25 @@ public OnClientDisconnect(client)
 	// If he was in some zone, guarantee to call the leave callback.
 	RemoveClientFromAllZones(client);
 	
-	// Client is no longer in any clusters.
-	// Just to make sure.
-	RemoveClientFromAllClusters(client);
+	new iNumGroups = GetArraySize(g_hZoneGroups);
+	new iNumClusters, group[ZoneGroup], zoneCluster[ZoneCluster];
+	for(new i=0;i<iNumGroups;i++)
+	{
+		GetGroupByIndex(i, group);
+		// Doesn't want to see zones anymore.
+		group[ZG_adminShowZones][client] = false;
+		SaveGroup(group);
+		
+		// Client is no longer in any clusters.
+		// Just to make sure.
+		iNumClusters = GetArraySize(group[ZG_cluster]);
+		for(new c=0;c<iNumClusters;c++)
+		{
+			GetZoneClusterByIndex(c, group, zoneCluster);
+			zoneCluster[ZC_clientInZones][client] = 0;
+			SaveCluster(group, zoneCluster);
+		}
+	}
 }
 
 public OnClientSayCommand_Post(client, const String:command[], const String:sArgs[])
@@ -770,12 +787,10 @@ public Action:Timer_ShowZones(Handle:timer)
 	new iNumGroups = GetArraySize(g_hZoneGroups);
 	new group[ZoneGroup], zoneData[ZoneData], iNumZones;
 	new Float:fPos[3], Float:fMins[3], Float:fMaxs[3], Float:fAngles[3];
+	new iClients[MaxClients], iNumClients;
 	for(new i=0;i<iNumGroups;i++)
 	{
 		GetGroupByIndex(i, group);
-		
-		if(!group[ZG_showZones])
-			continue;
 		
 		iNumZones = GetArraySize(group[ZG_zones]);
 		for(new z=0;z<iNumZones;z++)
@@ -789,7 +804,27 @@ public Action:Timer_ShowZones(Handle:timer)
 			Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
 			Array_Copy(zoneData[ZD_rotation], fAngles, 3);
 			
-			Effect_DrawBeamBoxRotatableToAll(fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, {255,0,0,255}, 0);
+			// Always show to all!
+			if(group[ZG_showZones])
+			{
+				Effect_DrawBeamBoxRotatableToAll(fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, {255,0,0,255}, 0);
+			}
+			else
+			{
+				for(new c=1;c<=MaxClients;c++)
+				{
+					if(!IsClientInGame(c))
+						continue;
+					
+					if(!group[ZG_adminShowZones][c])
+						continue;
+					
+					iClients[iNumClients++] = c;
+				}
+				
+				if(iNumClients > 0)
+					Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, {255,0,0,255}, 0);
+			}
 		}
 	}
 	
@@ -886,8 +921,10 @@ DisplayGroupRootMenu(client, group[ZoneGroup])
 		SetMenuExitBackButton(hMenu, true);
 	
 	new String:sBuffer[64];
-	Format(sBuffer, sizeof(sBuffer), "Show Zones: %T", (group[ZG_showZones]?"Yes":"No"), client);
-	AddMenuItem(hMenu, "showzones", sBuffer);
+	Format(sBuffer, sizeof(sBuffer), "Show Zones to all: %T", (group[ZG_showZones]?"Yes":"No"), client);
+	AddMenuItem(hMenu, "showzonesall", sBuffer);
+	Format(sBuffer, sizeof(sBuffer), "Show Zones to me only: %T", (group[ZG_adminShowZones][client]?"Yes":"No"), client);
+	AddMenuItem(hMenu, "showzonesme", sBuffer);
 	AddMenuItem(hMenu, "add", "Add new zone");
 	AddMenuItem(hMenu, "", "", ITEMDRAW_SPACER|ITEMDRAW_DISABLED);
 	
@@ -916,7 +953,7 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 		
 		// Handle toggling of zone visibility first
-		if(StrEqual(sInfo, "showzones"))
+		if(StrEqual(sInfo, "showzonesall"))
 		{
 			// warning 226: a variable is assigned to itself (symbol "group")
 			//group[ZG_showZones] = !group[ZG_showZones];
@@ -926,6 +963,20 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 			
 			// Show zones right away.
 			if(group[ZG_showZones])
+				TriggerTimer(g_hShowZonesTimer, true);
+			DisplayGroupRootMenu(param1, group);
+			return;
+		}
+		else if(StrEqual(sInfo, "showzonesme"))
+		{
+			// warning 226: a variable is assigned to itself (symbol "group")
+			//group[ZG_showZones] = !group[ZG_showZones];
+			new bool:swap = group[ZG_adminShowZones][param1];
+			group[ZG_adminShowZones][param1] = !swap;
+			SaveGroup(group);
+			
+			// Show zones right away.
+			if(group[ZG_adminShowZones][param1])
 				TriggerTimer(g_hShowZonesTimer, true);
 			DisplayGroupRootMenu(param1, group);
 			return;
@@ -2354,24 +2405,6 @@ RemoveClientFromAllZones(client)
 				continue;
 			
 			AcceptEntityInput(EntRefToEntIndex(zoneData[ZD_triggerEntity]), "EndTouch", client, client);
-		}
-	}
-}
-
-RemoveClientFromAllClusters(client)
-{
-	new iNumGroups = GetArraySize(g_hZoneGroups);
-	new iNumClusters, group[ZoneGroup], zoneCluster[ZoneCluster];
-	for(new i=0;i<iNumGroups;i++)
-	{
-		GetGroupByIndex(i, group);
-		iNumClusters = GetArraySize(group[ZG_cluster]);
-		for(new c=0;c<iNumClusters;c++)
-		{
-			GetZoneClusterByIndex(c, group, zoneCluster);
-			// TODO: Maybe fire leave callback in clusters he's still in?
-			zoneCluster[ZC_clientInZones][client] = 0;
-			SaveCluster(group, zoneCluster);
 		}
 	}
 }
