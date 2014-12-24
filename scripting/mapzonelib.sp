@@ -228,6 +228,12 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 				PrintToChat(client, "Map Zones > There is a zone called %s in the group \"%s\" already. Try a different name.", sArgs, group[ZG_name]);
 				return Plugin_Handled;
 			}
+			
+			if(ClusterExistsWithName(group, sArgs))
+			{
+				PrintToChat(client, "Map Zones > There is a cluster called %s in the group \"%s\" already. Try a different name.", sArgs, group[ZG_name]);
+				return Plugin_Handled;
+			}
 
 			PrintToChat(client, "Map Zones > Zone \"%s\" renamed to \"%s\".", zoneData[ZD_name], sArgs);
 			
@@ -253,6 +259,12 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 			if(ClusterExistsWithName(group, sArgs))
 			{
 				PrintToChat(client, "Map Zones > There is a cluster called %s in the group \"%s\" already. Try a different name.", sArgs, group[ZG_name]);
+				return Plugin_Handled;
+			}
+			
+			if(ZoneExistsWithName(group, sArgs))
+			{
+				PrintToChat(client, "Map Zones > There is a zone called %s in the group \"%s\" already. Try a different name.", sArgs, group[ZG_name]);
 				return Plugin_Handled;
 			}
 			
@@ -291,6 +303,12 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 			return Plugin_Handled;
 		}
 		
+		if(ClusterExistsWithName(group, sArgs))
+		{
+			PrintToChat(client, "Map Zones > There is a cluster called %s in the group \"%s\" already. Try a different name.", sArgs, group[ZG_name]);
+			return Plugin_Handled;
+		}
+		
 		SaveNewZone(client, sArgs);
 		return Plugin_Handled;
 	}
@@ -312,6 +330,12 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 		if(ClusterExistsWithName(group, sArgs))
 		{
 			PrintToChat(client, "Map Zones > There is a cluster called %s in the group \"%s\" already. Try a different name.", sArgs, group[ZG_name]);
+			return Plugin_Handled;
+		}
+		
+		if(ZoneExistsWithName(group, sArgs))
+		{
+			PrintToChat(client, "Map Zones > There is a zone called %s in the group \"%s\" already. Try a different name.", sArgs, group[ZG_name]);
 			return Plugin_Handled;
 		}
 		
