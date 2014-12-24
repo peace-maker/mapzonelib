@@ -55,6 +55,15 @@ functag public MapZoneMenuBackCB(client, const String:group[]);
 native bool:MapZone_SetMenuBackAction(const String:group[], MapZoneMenuBackCB:callback);
 
 /**
+ * Set the default color of the zone beams for this group.
+ *
+ * @param group   The zone group name.
+ * @param iColor  The RGBA colors of the laser.
+ * @return        True if set, false if no zone group with that name.
+ */
+native bool:MapZone_SetZoneDefaultColor(const String:group[], const iColor[4]);
+
+/**
  * Get an adt_array of zone (and cluster) names of this group.
  * Zone names are at most MAX_ZONE_NAME long.
  * 

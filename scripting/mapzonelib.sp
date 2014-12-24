@@ -37,6 +37,7 @@ enum ZoneGroup {
 	Handle:ZG_menuBackForward,
 	bool:ZG_showZones,
 	bool:ZG_adminShowZones[MAXPLAYERS+1],
+	ZG_defaultColor[4],
 	String:ZG_name[MAX_ZONE_GROUP_NAME]
 }
 
@@ -89,6 +90,7 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 	CreateNative("MapZone_RegisterZoneGroup", Native_RegisterZoneGroup);
 	CreateNative("MapZone_ShowMenu", Native_ShowMenu);
 	CreateNative("MapZone_SetMenuBackAction", Native_SetMenuBackAction);
+	CreateNative("MapZone_SetZoneDefaultColor", Native_SetZoneDefaultColor);
 	CreateNative("MapZone_GetGroupZones", Native_GetGroupZones);
 	CreateNative("MapZone_IsClusteredZone", Native_IsClusteredZone);
 	CreateNative("MapZone_GetClusterZones", Native_GetClusterZones);
@@ -530,6 +532,10 @@ public Native_RegisterZoneGroup(Handle:plugin, numParams)
 	group[ZG_zones] = CreateArray(_:ZoneData);
 	group[ZG_cluster] = CreateArray(_:ZoneCluster);
 	group[ZG_showZones] = GetConVarBool(g_hCVDebugZones);
+	group[ZG_menuBackForward] = INVALID_HANDLE;
+	// Default to red color.
+	group[ZG_defaultColor][0] = 255;
+	group[ZG_defaultColor][3] = 255;
 	
 	// Load the zone details
 	LoadZoneGroup(group);
@@ -551,6 +557,25 @@ public Native_ShowMenu(Handle:plugin, numParams)
 		return false;
 	
 	DisplayGroupRootMenu(client, group);
+	return true;
+}
+
+// native bool:MapZone_SetZoneDefaultColor(const String:group[], const iColor[4]);
+public Native_SetZoneDefaultColor(Handle:plugin, numParams)
+{
+	new String:sName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sName, sizeof(sName));
+	
+	new iColor[4];
+	GetNativeArray(2, iColor, 4);
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sName, group))
+		return false;
+	
+	Array_Copy(iColor, group[ZG_defaultColor], 4);
+	SaveGroup(group);
+	
 	return true;
 }
 
@@ -817,10 +842,13 @@ public Action:Timer_ShowZones(Handle:timer)
 	new group[ZoneGroup], zoneData[ZoneData], iNumZones;
 	new Float:fPos[3], Float:fMins[3], Float:fMaxs[3], Float:fAngles[3];
 	new iClients[MaxClients], iNumClients;
+	new iColor[4];
+	
 	for(new i=0;i<iNumGroups;i++)
 	{
 		GetGroupByIndex(i, group);
 		
+		Array_Copy(group[ZG_defaultColor], iColor, 4);
 		iNumZones = GetArraySize(group[ZG_zones]);
 		for(new z=0;z<iNumZones;z++)
 		{
@@ -836,7 +864,7 @@ public Action:Timer_ShowZones(Handle:timer)
 			// Always show to all!
 			if(group[ZG_showZones])
 			{
-				Effect_DrawBeamBoxRotatableToAll(fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, {255,0,0,255}, 0);
+				Effect_DrawBeamBoxRotatableToAll(fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, iColor, 0);
 			}
 			else
 			{
@@ -852,7 +880,7 @@ public Action:Timer_ShowZones(Handle:timer)
 				}
 				
 				if(iNumClients > 0)
-					Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, {255,0,0,255}, 0);
+					Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, iColor, 0);
 			}
 		}
 	}
