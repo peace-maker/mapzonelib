@@ -1349,8 +1349,11 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 			for(new i=0;i<iNumZones;i++)
 			{
 				GetZoneByIndex(i, group, zoneData);
+				if(zoneData[ZD_deleted])
+					continue;
+				
 				// Only delete zones in this cluster!
-				if(zoneData[ZD_clusterIndex] == zoneCluster[ZC_index])
+				if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
 					continue;
 				
 				RemoveZoneTrigger(group, zoneData);
