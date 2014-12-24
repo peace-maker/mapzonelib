@@ -201,7 +201,7 @@ public OnClientDisconnect(client)
 	}
 }
 
-public OnClientSayCommand_Post(client, const String:command[], const String:sArgs[])
+public Action:OnClientSayCommand(client, const String:command[], const String:sArgs[])
 {
 	if(g_ClientMenuState[client][CMS_rename])
 	{
@@ -219,14 +219,14 @@ public OnClientSayCommand_Post(client, const String:command[], const String:sArg
 			{
 				PrintToChat(client, "Map Zones > Renaming of zone \"%s\" stopped.", zoneData[ZD_name]);
 				DisplayZoneEditMenu(client);
-				return;
+				return Plugin_Handled;
 			}
 			
 			// Make sure the name is unique in this group.
 			if(ZoneExistsWithName(group, sArgs))
 			{
 				PrintToChat(client, "Map Zones > There is a zone called %s in the group \"%s\" already. Try a different name.", sArgs, group[ZG_name]);
-				return;
+				return Plugin_Handled;
 			}
 
 			PrintToChat(client, "Map Zones > Zone \"%s\" renamed to \"%s\".", zoneData[ZD_name], sArgs);
@@ -235,6 +235,7 @@ public OnClientSayCommand_Post(client, const String:command[], const String:sArg
 			SaveZone(group, zoneData);
 			
 			DisplayZoneEditMenu(client);
+			return Plugin_Handled;
 		}
 		else if(g_ClientMenuState[client][CMS_cluster] != -1)
 		{
@@ -245,14 +246,14 @@ public OnClientSayCommand_Post(client, const String:command[], const String:sArg
 			{
 				PrintToChat(client, "Map Zones > Renaming of cluster \"%s\" stopped.", zoneCluster[ZC_name]);
 				DisplayClusterEditMenu(client);
-				return;
+				return Plugin_Handled;
 			}
 			
 			// Make sure the cluster name is unique in this group.
 			if(ClusterExistsWithName(group, sArgs))
 			{
 				PrintToChat(client, "Map Zones > There is a cluster called %s in the group \"%s\" already. Try a different name.", sArgs, group[ZG_name]);
-				return;
+				return Plugin_Handled;
 			}
 			
 			strcopy(zoneCluster[ZC_name], MAX_ZONE_NAME, sArgs);
@@ -260,6 +261,7 @@ public OnClientSayCommand_Post(client, const String:command[], const String:sArg
 			
 			PrintToChat(client, "Map Zones > Cluster \"%s\" renamed to \"%s\".", zoneCluster[ZC_name], sArgs);
 			DisplayClusterEditMenu(client);
+			return Plugin_Handled;
 		}
 	}
 	else if(g_ClientMenuState[client][CMS_addZone] && g_ClientMenuState[client][CMS_editState] == ZES_name)
@@ -280,16 +282,17 @@ public OnClientSayCommand_Post(client, const String:command[], const String:sArg
 			{
 				DisplayClusterEditMenu(client);
 			}
-			return;
+			return Plugin_Handled;
 		}
 		
 		if(ZoneExistsWithName(group, sArgs))
 		{
 			PrintToChat(client, "Map Zones > There is a zone called %s in the group \"%s\" already. Try a different name.", sArgs, group[ZG_name]);
-			return;
+			return Plugin_Handled;
 		}
 		
 		SaveNewZone(client, sArgs);
+		return Plugin_Handled;
 	}
 	else if(g_ClientMenuState[client][CMS_addCluster])
 	{
@@ -299,7 +302,7 @@ public OnClientSayCommand_Post(client, const String:command[], const String:sArg
 			
 			PrintToChat(client, "Map Zones > Aborted adding of new cluster.");
 			DisplayClusterListMenu(client);
-			return;
+			return Plugin_Handled;
 		}
 		
 		new group[ZoneGroup];
@@ -309,7 +312,7 @@ public OnClientSayCommand_Post(client, const String:command[], const String:sArg
 		if(ClusterExistsWithName(group, sArgs))
 		{
 			PrintToChat(client, "Map Zones > There is a cluster called %s in the group \"%s\" already. Try a different name.", sArgs, group[ZG_name]);
-			return;
+			return Plugin_Handled;
 		}
 		
 		g_ClientMenuState[client][CMS_addCluster] = false;
@@ -322,7 +325,9 @@ public OnClientSayCommand_Post(client, const String:command[], const String:sArg
 		PrintToChat(client, "Map Zones > Added new cluster %s.", zoneCluster[ZC_name]);
 		g_ClientMenuState[client][CMS_cluster] = zoneCluster[ZC_index];
 		DisplayClusterEditMenu(client);
+		return Plugin_Handled;
 	}
+	return Plugin_Continue;
 }
 
 public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:angles[3], &weapon, &subtype, &cmdnum, &tickcount, &seed, mouse[2])
