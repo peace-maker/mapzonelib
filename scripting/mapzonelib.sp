@@ -66,19 +66,32 @@ enum ClientMenuState {
 	Float:CMS_center[3]
 }
 
+enum ClientClipBoard {
+	Float:CB_mins[3],
+	Float:CB_maxs[3],
+	Float:CB_position[3],
+	Float:CB_rotation[3],
+	String:CB_name[MAX_ZONE_NAME]
+}
+
 new Handle:g_hCVDebugZones;
 
 new Handle:g_hfwdOnEnterForward;
 new Handle:g_hfwdOnLeaveForward;
 
+// Displaying of zones using laser beams
 new Handle:g_hShowZonesTimer;
 new g_iLaserMaterial = -1;
 new g_iHaloMaterial = -1;
 new g_iGlowSprite = -1;
 
+// Central array to save all information about zones
 new Handle:g_hZoneGroups;
 
+// Support for browsing through nested menus
 new g_ClientMenuState[MAXPLAYERS+1][ClientMenuState];
+// Copy & paste zones even over different groups.
+new g_Clipboard[MAXPLAYERS+1][ClientClipBoard];
 
 public Plugin:myinfo = 
 {
@@ -182,7 +195,10 @@ public OnClientDisconnect(client)
 	g_ClientMenuState[client][CMS_editCenter] = false;
 	g_ClientMenuState[client][CMS_editPosition] = false;
 	Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
+	Array_Fill(g_ClientMenuState[client][CMS_center], 3, 0.0);
 	ResetZoneAddingState(client);
+	
+	ClearClientClipboard(client);
 	
 	// If he was in some zone, guarantee to call the leave callback.
 	RemoveClientFromAllZones(client);
@@ -300,9 +316,18 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 		
 		if(!StrContains(sArgs, "!abort"))
 		{
+			// When pasting a zone from the clipboard, 
+			// we want to edit the center position right away afterwards.
+			if(g_ClientMenuState[client][CMS_editCenter])
+				PrintToChat(client, "Map Zones > Aborted pasting of zone in clipboard.");
+			else
+				PrintToChat(client, "Map Zones > Aborted adding of new zone.");
+			
 			ResetZoneAddingState(client);
 			
-			PrintToChat(client, "Map Zones > Aborted adding of new zone.");
+			// In case we tried to paste a zone.
+			g_ClientMenuState[client][CMS_editCenter] = false;
+			
 			if(g_ClientMenuState[client][CMS_cluster] == -1)
 			{
 				DisplayGroupRootMenu(client, group);
@@ -900,7 +925,7 @@ public Action:Timer_ShowZones(Handle:timer)
 		}
 	}
 	
-	new Float:vFirstPoint[3], Float: vSecondPoint[3];
+	new Float:vFirstPoint[3], Float:vSecondPoint[3];
 	for(new i=1;i<=MaxClients;i++)
 	{
 		if(g_ClientMenuState[i][CMS_addZone] && g_ClientMenuState[i][CMS_editState] == ZES_name)
@@ -914,7 +939,7 @@ public Action:Timer_ShowZones(Handle:timer)
 			Effect_DrawBeamBoxToClient(i, vFirstPoint, vSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, {0,0,255,255}, 0);
 		}
 		
-		if(g_ClientMenuState[i][CMS_editPosition]
+		else if(g_ClientMenuState[i][CMS_editPosition]
 		|| g_ClientMenuState[i][CMS_editRotation]
 		|| g_ClientMenuState[i][CMS_editCenter])
 		{
@@ -992,6 +1017,7 @@ DisplayGroupRootMenu(client, group[ZoneGroup])
 		PrintToChat(client, "Map Zones > Aborted adding of cluster.");
 	}
 	
+	g_ClientMenuState[client][CMS_editCenter] = false;
 	g_ClientMenuState[client][CMS_editRotation] = false;
 	g_ClientMenuState[client][CMS_cluster] = -1;
 	g_ClientMenuState[client][CMS_zone] = -1;
@@ -1008,6 +1034,7 @@ DisplayGroupRootMenu(client, group[ZoneGroup])
 	Format(sBuffer, sizeof(sBuffer), "Show Zones to me only: %T", (group[ZG_adminShowZones][client]?"Yes":"No"), client);
 	AddMenuItem(hMenu, "showzonesme", sBuffer);
 	AddMenuItem(hMenu, "add", "Add new zone");
+	AddMenuItem(hMenu, "paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
 	AddMenuItem(hMenu, "", "", ITEMDRAW_SPACER|ITEMDRAW_DISABLED);
 	
 	AddMenuItem(hMenu, "zones", "List standalone zones");
@@ -1047,7 +1074,6 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 			if(group[ZG_showZones])
 				TriggerTimer(g_hShowZonesTimer, true);
 			DisplayGroupRootMenu(param1, group);
-			return;
 		}
 		// Show zone only to menu user.
 		else if(StrEqual(sInfo, "showzonesme"))
@@ -1084,14 +1110,20 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 			if(group[ZG_adminShowZones][param1])
 				TriggerTimer(g_hShowZonesTimer, true);
 			DisplayGroupRootMenu(param1, group);
-			return;
 		}
 		else if(StrEqual(sInfo, "add"))
 		{
 			g_ClientMenuState[param1][CMS_addZone] = true;
 			g_ClientMenuState[param1][CMS_editState] = ZES_first;
 			PrintToChat(param1, "Map Zones > Shoot at the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
-			return;
+		}
+		// Paste zone from clipboard.
+		else if(StrEqual(sInfo, "paste"))
+		{
+			if(HasZoneInClipboard(param1))
+				PasteFromClipboard(param1);
+			else
+				DisplayGroupRootMenu(param1, group);
 		}
 		else if(StrEqual(sInfo, "zones"))
 		{
@@ -1279,9 +1311,10 @@ DisplayClusterEditMenu(client)
 	SetMenuTitle(hMenu, "Manage cluster \"%s\" of group \"%s\"", zoneCluster[ZC_name], group[ZG_name]);
 	
 	new String:sBuffer[64];
-	AddMenuItem(hMenu, "add", "Add zone in cluster");
 	Format(sBuffer, sizeof(sBuffer), "Show zones in this cluster to me: %T", (zoneCluster[ZC_adminShowZones][client]?"Yes":"No"), client);
 	AddMenuItem(hMenu, "show", sBuffer);
+	AddMenuItem(hMenu, "add", "Add zone in cluster");
+	AddMenuItem(hMenu, "paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
 	AddMenuItem(hMenu, "rename", "Rename");
 	AddMenuItem(hMenu, "delete", "Delete");
 	
@@ -1356,6 +1389,14 @@ public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
 				TriggerTimer(g_hShowZonesTimer, true);
 			
 			DisplayClusterEditMenu(param1);
+		}
+		// Paste zone from clipboard.
+		else if(StrEqual(sInfo, "paste"))
+		{
+			if(HasZoneInClipboard(param1))
+				PasteFromClipboard(param1);
+			else
+				DisplayClusterEditMenu(param1);
 		}
 		// Change the name of the cluster
 		else if(StrEqual(sInfo, "rename"))
@@ -1484,6 +1525,7 @@ DisplayZoneEditMenu(client)
 	else
 		Format(sBuffer, sizeof(sBuffer), "Remove from cluster \"%s\"", zoneCluster[ZC_name]);
 	AddMenuItem(hMenu, "cluster", sBuffer);
+	AddMenuItem(hMenu, "copy", "Copy to clipboard");
 	AddMenuItem(hMenu, "rename", "Rename");
 	AddMenuItem(hMenu, "delete", "Delete");
 	
@@ -1556,6 +1598,13 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 				SendPanelToClient(hPanel, param1, Panel_HandleConfirmRemoveFromCluster, MENU_TIME_FOREVER);
 				CloseHandle(hPanel);
 			}
+		}
+		// Edit details like position and rotation
+		else if(StrEqual(sInfo, "copy"))
+		{
+			SaveToClipboard(param1, zoneData);
+			PrintToChat(param1, "Map Zones > Copied zone \"%s\" to clipboard.", zoneData[ZD_name]);
+			DisplayZoneEditMenu(param1);
 		}
 		// Change the name of the zone
 		else if(StrEqual(sInfo, "rename"))
@@ -2100,9 +2149,16 @@ DisplayZoneAddFinalizationMenu(client)
 	}
 	SetMenuExitBackButton(hMenu, true);
 	
+	new String:sBuffer[128];
+	// When pasting a zone we want to edit the center position afterwards right away.
+	if(g_ClientMenuState[client][CMS_editCenter])
+	{
+		Format(sBuffer, sizeof(sBuffer), "Pasting new copy of zone \"%s\".", g_Clipboard[client][CB_name]);
+		AddMenuItem(hMenu, "", sBuffer, ITEMDRAW_DISABLED);
+	}
+	
 	AddMenuItem(hMenu, "", "Type zone name in chat to save it. (\"!abort\" to abort)", ITEMDRAW_DISABLED);
 	
-	new String:sBuffer[128];
 	GetFreeAutoZoneName(group, sBuffer, sizeof(sBuffer));
 	Format(sBuffer, sizeof(sBuffer), "Use auto-generated zone name (%s)", sBuffer);
 	AddMenuItem(hMenu, "autoname", sBuffer);
@@ -2136,6 +2192,8 @@ public Menu_HandleAddFinalization(Handle:menu, MenuAction:action, param1, param2
 		else if(StrEqual(sInfo, "discard"))
 		{
 			ResetZoneAddingState(param1);
+			// In case we were pasting a zone from clipboard.
+			g_ClientMenuState[param1][CMS_editCenter] = false;
 			if(g_ClientMenuState[param1][CMS_cluster] == -1)
 				DisplayGroupRootMenu(param1, group);
 			else
@@ -2145,6 +2203,8 @@ public Menu_HandleAddFinalization(Handle:menu, MenuAction:action, param1, param2
 	else if(action == MenuAction_Cancel)
 	{
 		ResetZoneAddingState(param1);
+		// In case we were pasting a zone from clipboard.
+		g_ClientMenuState[param1][CMS_editCenter] = false;
 		if(param2 == MenuCancel_ExitBack)
 		{
 			if(g_ClientMenuState[param1][CMS_cluster] != -1)
@@ -2793,25 +2853,30 @@ SaveNewZone(client, const String:sName[])
 	zoneData[ZD_index] = GetArraySize(group[ZG_zones]);
 	PushArrayArray(group[ZG_zones], zoneData[0], _:ZoneData);
 	
-	
 	if(zoneData[ZD_clusterIndex] == -1)
+	{
 		PrintToChat(client, "Map Zones > Added new zone \"%s\" to group \"%s\".", sName, group[ZG_name]);
+		LogAction(client, -1, "%L created a new zone in group \"%s\" called \"%s\" at [%f,%f,%f]", client, group[ZG_name], zoneData[ZD_name], zoneData[ZD_position][0], zoneData[ZD_position][1], zoneData[ZD_position][2]);
+	}
 	else
+	{
 		PrintToChat(client, "Map Zones > Added new zone \"%s\" to cluster \"%s\" in group \"%s\".", sName, zoneCluster[ZC_name], group[ZG_name]);
+		LogAction(client, -1, "%L created a new zone in cluster \"%s\" of group \"%s\" called \"%s\" at [%f,%f,%f]", client, zoneCluster[ZC_name], group[ZG_name], zoneData[ZD_name], zoneData[ZD_position][0], zoneData[ZD_position][1], zoneData[ZD_position][2]);
+	}
 	ResetZoneAddingState(client);
 	
 	// Create the trigger.
 	if(!SetupZone(group, zoneData))
 		PrintToChat(client, "Map Zones > Error creating trigger for new zone.");
 	
-	if(g_ClientMenuState[client][CMS_cluster] != -1)
-		LogAction(client, -1, "%L created a new zone in cluster \"%s\" of group \"%s\" called \"%s\" at [%f,%f,%f]", client, zoneCluster[ZC_name], group[ZG_name], zoneData[ZD_name], zoneData[ZD_position][0], zoneData[ZD_position][1], zoneData[ZD_position][2]);
-	else
-		LogAction(client, -1, "%L created a new zone in group \"%s\" called \"%s\" at [%f,%f,%f]", client, group[ZG_name], zoneData[ZD_name], zoneData[ZD_position][0], zoneData[ZD_position][1], zoneData[ZD_position][2]);
-	
 	// Edit the new zone right away.
 	g_ClientMenuState[client][CMS_zone] = zoneData[ZD_index];
-	DisplayZoneEditMenu(client);
+	
+	// If we just pasted this zone, we want to edit the center position right away!
+	if(g_ClientMenuState[client][CMS_editCenter])
+		DisplayZoneCenterMenu(client);
+	else
+		DisplayZoneEditMenu(client);
 }
 
 SaveChangedZoneCoordinates(client, zoneData[ZoneData])
@@ -2884,6 +2949,53 @@ GetFreeAutoZoneName(group[ZoneGroup], String:sBuffer[], maxlen)
 	{
 		Format(sBuffer, maxlen, "Zone %d", iIndex++);
 	} while(ZoneExistsWithName(group, sBuffer));
+}
+
+/**
+ * Clipboard helpers
+ */
+ClearClientClipboard(client)
+{
+	Array_Fill(g_Clipboard[client][CB_mins], 3, 0.0);
+	Array_Fill(g_Clipboard[client][CB_maxs], 3, 0.0);
+	Array_Fill(g_Clipboard[client][CB_position], 3, 0.0);
+	Array_Fill(g_Clipboard[client][CB_rotation], 3, 0.0);
+	g_Clipboard[client][CB_name][0] = '\0';
+}
+
+SaveToClipboard(client, zoneData[ZoneData])
+{
+	Array_Copy(zoneData[ZD_mins], g_Clipboard[client][CB_mins], 3);
+	Array_Copy(zoneData[ZD_maxs], g_Clipboard[client][CB_maxs], 3);
+	Array_Copy(zoneData[ZD_position], g_Clipboard[client][CB_position], 3);
+	Array_Copy(zoneData[ZD_rotation], g_Clipboard[client][CB_rotation], 3);
+	strcopy(g_Clipboard[client][CB_name], MAX_ZONE_NAME, zoneData[ZD_name]);
+}
+
+PasteFromClipboard(client)
+{
+	// We want to edit the center position directly afterwards
+	g_ClientMenuState[client][CMS_editCenter] = true;
+	// But first we have to add the zone to the current group and give it a new name.
+	g_ClientMenuState[client][CMS_addZone] = true;
+	g_ClientMenuState[client][CMS_editState] = ZES_name;
+	
+	// Copy the details to the client state.
+	for(new i=0;i<3;i++)
+	{
+		g_ClientMenuState[client][CMS_first][i] = g_Clipboard[client][CB_position][i] + g_Clipboard[client][CB_mins][i];
+		g_ClientMenuState[client][CMS_second][i] = g_Clipboard[client][CB_position][i] + g_Clipboard[client][CB_maxs][i];
+		g_ClientMenuState[client][CMS_rotation][i] = g_Clipboard[client][CB_rotation][i];
+		g_ClientMenuState[client][CMS_center][i] = g_Clipboard[client][CB_position][i];
+	}
+	
+	PrintToChat(client, "Map Zones > Please type a new name for this new copy of zone \"%s\" in chat. Type \"!abort\" to abort.", g_Clipboard[client][CB_name]);
+	DisplayZoneAddFinalizationMenu(client);
+}
+
+bool:HasZoneInClipboard(client)
+{
+	return g_Clipboard[client][CB_name][0] != '\0';
 }
 
 /**
