@@ -1477,10 +1477,7 @@ DisplayZoneEditMenu(client)
 	AddMenuItem(hMenu, "teleport", "Teleport to");
 	Format(sBuffer, sizeof(sBuffer), "Show zone to me: %T", (zoneData[ZD_adminShowZone][client]?"Yes":"No"), client);
 	AddMenuItem(hMenu, "show", sBuffer);
-	AddMenuItem(hMenu, "position1", "Change first corner");
-	AddMenuItem(hMenu, "position2", "Change second corner");
-	AddMenuItem(hMenu, "rotation", "Change rotation");
-	AddMenuItem(hMenu, "center", "Move center of zone");
+	AddMenuItem(hMenu, "edit", "Edit zone");
 	
 	if(zoneData[ZD_clusterIndex] == -1)
 		Format(sBuffer, sizeof(sBuffer), "Add to a cluster");
@@ -1516,6 +1513,7 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 			TeleportEntity(param1, vBuf, NULL_VECTOR, NULL_VECTOR);
 			DisplayZoneEditMenu(param1);
 		}
+		// Show zone to admin
 		else if(StrEqual(sInfo, "show"))
 		{
 			new bool:swap = !zoneData[ZD_adminShowZone][param1];
@@ -1526,43 +1524,10 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 				TriggerTimer(g_hShowZonesTimer, true);
 			DisplayZoneEditMenu(param1);
 		}
-		// Change one of the 2 positions of the zone
-		else if(!StrContains(sInfo, "position"))
+		// Edit details like position and rotation
+		else if(!StrContains(sInfo, "edit"))
 		{
-			g_ClientMenuState[param1][CMS_editState] = (StrEqual(sInfo, "position1")?ZES_first:ZES_second);
-			g_ClientMenuState[param1][CMS_editPosition] = true;
-			
-			// Get the current zone bounds as base to edit from.
-			for(new i=0;i<3;i++)
-			{
-				g_ClientMenuState[param1][CMS_first][i] = zoneData[ZD_position][i] + zoneData[ZD_mins][i];
-				g_ClientMenuState[param1][CMS_second][i] = zoneData[ZD_position][i] + zoneData[ZD_maxs][i];
-				g_ClientMenuState[param1][CMS_rotation][i] = zoneData[ZD_rotation][i];
-			}
-			
-			TriggerTimer(g_hShowZonesTimer, true);
-			
-			DisplayPositionEditMenu(param1);
-		}
-		// Change rotation of the zone
-		else if(StrEqual(sInfo, "rotation"))
-		{
-			// Copy current rotation from zoneData to clientstate.
-			Array_Copy(zoneData[ZD_rotation], g_ClientMenuState[param1][CMS_rotation], 3);
-			g_ClientMenuState[param1][CMS_editRotation] = true;
-			// Show box now
-			TriggerTimer(g_hShowZonesTimer, true);
-			DisplayZoneRotationMenu(param1);
-		}
-		// Keep mins & maxs the same and move the center position.
-		else if(StrEqual(sInfo, "center"))
-		{
-			// Copy current position from zoneData to clientstate.
-			Array_Copy(zoneData[ZD_position], g_ClientMenuState[param1][CMS_center], 3);
-			g_ClientMenuState[param1][CMS_editCenter] = true;
-			// Show box now
-			TriggerTimer(g_hShowZonesTimer, true);
-			DisplayZoneCenterMenu(param1);
+			DisplayZoneEditDetailsMenu(param1);
 		}
 		// Change the name of the zone
 		else if(StrEqual(sInfo, "cluster"))
@@ -1627,6 +1592,105 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 		}
 		else
 		{
+			g_ClientMenuState[param1][CMS_group] = -1;
+			g_ClientMenuState[param1][CMS_cluster] = -1;
+		}
+	}
+}
+
+DisplayZoneEditDetailsMenu(client)
+{
+	new group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
+	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
+	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
+
+	if(zoneData[ZD_deleted])
+	{
+		DisplayGroupRootMenu(client, group);
+		return;
+	}
+	
+	new Handle:hMenu = CreateMenu(Menu_HandleZoneEditDetails);
+	SetMenuExitBackButton(hMenu, true);
+	if(g_ClientMenuState[client][CMS_cluster] == -1)
+		SetMenuTitle(hMenu, "Edit zone \"%s\" in group \"%s\"", zoneData[ZD_name], group[ZG_name]);
+	else
+	{
+		GetZoneClusterByIndex(g_ClientMenuState[client][CMS_cluster], group, zoneCluster);
+		SetMenuTitle(hMenu, "Edit zone \"%s\" in cluster \"%s\" of group \"%s\"", zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
+	}
+	
+	AddMenuItem(hMenu, "position1", "Change first corner");
+	AddMenuItem(hMenu, "position2", "Change second corner");
+	AddMenuItem(hMenu, "center", "Move center of zone");
+	AddMenuItem(hMenu, "rotation", "Change rotation");
+	
+	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+}
+
+public Menu_HandleZoneEditDetails(Handle:menu, MenuAction:action, param1, param2)
+{
+	if(action == MenuAction_End)
+	{
+		CloseHandle(menu);
+	}
+	else if(action == MenuAction_Select)
+	{
+		new String:sInfo[32];
+		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		
+		new group[ZoneGroup], zoneData[ZoneData];
+		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
+		GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
+		
+		// Change one of the 2 positions of the zone
+		if(!StrContains(sInfo, "position"))
+		{
+			g_ClientMenuState[param1][CMS_editState] = (StrEqual(sInfo, "position1")?ZES_first:ZES_second);
+			g_ClientMenuState[param1][CMS_editPosition] = true;
+			
+			// Get the current zone bounds as base to edit from.
+			for(new i=0;i<3;i++)
+			{
+				g_ClientMenuState[param1][CMS_first][i] = zoneData[ZD_position][i] + zoneData[ZD_mins][i];
+				g_ClientMenuState[param1][CMS_second][i] = zoneData[ZD_position][i] + zoneData[ZD_maxs][i];
+				g_ClientMenuState[param1][CMS_rotation][i] = zoneData[ZD_rotation][i];
+			}
+			
+			TriggerTimer(g_hShowZonesTimer, true);
+			
+			DisplayPositionEditMenu(param1);
+		}
+		// Change rotation of the zone
+		else if(StrEqual(sInfo, "rotation"))
+		{
+			// Copy current rotation from zoneData to clientstate.
+			Array_Copy(zoneData[ZD_rotation], g_ClientMenuState[param1][CMS_rotation], 3);
+			g_ClientMenuState[param1][CMS_editRotation] = true;
+			// Show box now
+			TriggerTimer(g_hShowZonesTimer, true);
+			DisplayZoneRotationMenu(param1);
+		}
+		// Keep mins & maxs the same and move the center position.
+		else if(StrEqual(sInfo, "center"))
+		{
+			// Copy current position from zoneData to clientstate.
+			Array_Copy(zoneData[ZD_position], g_ClientMenuState[param1][CMS_center], 3);
+			g_ClientMenuState[param1][CMS_editCenter] = true;
+			// Show box now
+			TriggerTimer(g_hShowZonesTimer, true);
+			DisplayZoneCenterMenu(param1);
+		}
+	}
+	else if(action == MenuAction_Cancel)
+	{
+		if(param2 == MenuCancel_ExitBack)
+		{
+			DisplayZoneEditMenu(param1);
+		}
+		else
+		{
+			g_ClientMenuState[param1][CMS_zone] = -1;
 			g_ClientMenuState[param1][CMS_group] = -1;
 			g_ClientMenuState[param1][CMS_cluster] = -1;
 		}
@@ -1829,7 +1893,7 @@ public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
 			g_ClientMenuState[param1][CMS_editPosition] = false;
 			g_ClientMenuState[param1][CMS_editState] = ZES_first;
 			ResetZoneAddingState(param1);
-			DisplayZoneEditMenu(param1);
+			DisplayZoneEditDetailsMenu(param1);
 			TriggerTimer(g_hShowZonesTimer, true);
 			return;
 		}
@@ -1856,7 +1920,7 @@ public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
 		ResetZoneAddingState(param1);
 		if(param2 == MenuCancel_ExitBack)
 		{
-			DisplayZoneEditMenu(param1);
+			DisplayZoneEditDetailsMenu(param1);
 		}
 		else
 		{
@@ -1909,7 +1973,7 @@ public Menu_HandleZoneRotation(Handle:menu, MenuAction:action, param1, param2)
 			SetupZone(group, zoneData);
 			g_ClientMenuState[param1][CMS_editRotation] = false;
 			Array_Fill(g_ClientMenuState[param1][CMS_rotation], 3, 0.0);
-			DisplayZoneEditMenu(param1);
+			DisplayZoneEditDetailsMenu(param1);
 		}
 		else if(StrEqual(sInfo, "reset"))
 		{
@@ -1921,7 +1985,7 @@ public Menu_HandleZoneRotation(Handle:menu, MenuAction:action, param1, param2)
 		{
 			Array_Fill(g_ClientMenuState[param1][CMS_rotation], 3, 0.0);
 			g_ClientMenuState[param1][CMS_editRotation] = false;
-			DisplayZoneEditMenu(param1);
+			DisplayZoneEditDetailsMenu(param1);
 		}
 	}
 	else if(action == MenuAction_Cancel)
@@ -1930,7 +1994,7 @@ public Menu_HandleZoneRotation(Handle:menu, MenuAction:action, param1, param2)
 		Array_Fill(g_ClientMenuState[param1][CMS_rotation], 3, 0.0);
 		if(param2 == MenuCancel_ExitBack)
 		{
-			DisplayZoneEditMenu(param1);
+			DisplayZoneEditDetailsMenu(param1);
 		}
 		else
 		{
@@ -1984,7 +2048,7 @@ public Menu_HandleZoneCenter(Handle:menu, MenuAction:action, param1, param2)
 			SaveZone(group, zoneData);
 			SetupZone(group, zoneData);
 			g_ClientMenuState[param1][CMS_editCenter] = false;
-			DisplayZoneEditMenu(param1);
+			DisplayZoneEditDetailsMenu(param1);
 			TriggerTimer(g_hShowZonesTimer, true);
 			return;
 		}
@@ -2006,7 +2070,7 @@ public Menu_HandleZoneCenter(Handle:menu, MenuAction:action, param1, param2)
 		g_ClientMenuState[param1][CMS_editCenter] = false;
 		if(param2 == MenuCancel_ExitBack)
 		{
-			DisplayZoneEditMenu(param1);
+			DisplayZoneEditDetailsMenu(param1);
 		}
 		else
 		{
