@@ -19,6 +19,7 @@ enum ZoneData {
 	Float:ZD_rotation[3],
 	bool:ZD_deleted, // We can't directly delete zones, because we use the array index as identifier. Deleting would mean an array shiftup.
 	bool:ZD_clientInZone[MAXPLAYERS+1], // List of clients in this zone.
+	bool:ZD_adminShowZone[MAXPLAYERS+1], // List of clients which want to see this zone.
 	String:ZD_name[MAX_ZONE_NAME],
 	String:ZD_triggerModel[PLATFORM_MAX_PATH] // Name of the brush model of the trigger which fits this zone best.
 }
@@ -26,6 +27,7 @@ enum ZoneData {
 enum ZoneCluster {
 	ZC_index,
 	bool:ZC_deleted,
+	bool:ZC_adminShowZones[MAXPLAYERS+1],  // Just to remember if we want to toggle all zones in this cluster on or off.
 	ZC_clientInZones[MAXPLAYERS+1], // Save for each player in how many zones of this cluster he is.
 	String:ZC_name[MAX_ZONE_NAME]
 };
@@ -36,7 +38,7 @@ enum ZoneGroup {
 	Handle:ZG_cluster,
 	Handle:ZG_menuBackForward,
 	bool:ZG_showZones,
-	bool:ZG_adminShowZones[MAXPLAYERS+1],
+	bool:ZG_adminShowZones[MAXPLAYERS+1], // Just to remember if we want to toggle all zones in this group on or off.
 	ZG_defaultColor[4],
 	String:ZG_name[MAX_ZONE_GROUP_NAME]
 }
@@ -186,13 +188,22 @@ public OnClientDisconnect(client)
 	RemoveClientFromAllZones(client);
 	
 	new iNumGroups = GetArraySize(g_hZoneGroups);
-	new iNumClusters, group[ZoneGroup], zoneCluster[ZoneCluster];
+	new iNumClusters, iNumZones;
+	new group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
 	for(new i=0;i<iNumGroups;i++)
 	{
 		GetGroupByIndex(i, group);
-		// Doesn't want to see zones anymore.
 		group[ZG_adminShowZones][client] = false;
 		SaveGroup(group);
+		
+		iNumZones = GetArraySize(group[ZG_cluster]);
+		for(new z=0;z<iNumZones;z++)
+		{
+			GetZoneByIndex(z, group, zoneData);
+			// Doesn't want to see zones anymore.
+			zoneData[ZD_adminShowZone][client] = false;
+			SaveZone(group, zoneData);
+		}
 		
 		// Client is no longer in any clusters.
 		// Just to make sure.
@@ -201,6 +212,7 @@ public OnClientDisconnect(client)
 		{
 			GetZoneClusterByIndex(c, group, zoneCluster);
 			zoneCluster[ZC_clientInZones][client] = 0;
+			zoneCluster[ZC_adminShowZones][client] = false;
 			SaveCluster(group, zoneCluster);
 		}
 	}
@@ -876,7 +888,7 @@ public Action:Timer_ShowZones(Handle:timer)
 					if(!IsClientInGame(c))
 						continue;
 					
-					if(!group[ZG_adminShowZones][c])
+					if(!zoneData[ZD_adminShowZone][c])
 						continue;
 					
 					iClients[iNumClients++] = c;
@@ -1037,13 +1049,36 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 			DisplayGroupRootMenu(param1, group);
 			return;
 		}
+		// Show zone only to menu user.
 		else if(StrEqual(sInfo, "showzonesme"))
 		{
 			// warning 226: a variable is assigned to itself (symbol "group")
 			//group[ZG_showZones] = !group[ZG_showZones];
-			new bool:swap = group[ZG_adminShowZones][param1];
-			group[ZG_adminShowZones][param1] = !swap;
+			// We save the toggle state for this menu in the group.
+			// The actual showing/hiding of zones is done in the below loop.
+			new bool:swap = !group[ZG_adminShowZones][param1];
+			group[ZG_adminShowZones][param1] = swap;
 			SaveGroup(group);
+			
+			// Set the zones in this group to show for this admin or not.
+			new iNumZones = GetArraySize(group[ZG_zones]);
+			new zoneData[ZoneData];
+			for(new i=0;i<iNumZones;i++)
+			{
+				GetZoneByIndex(i, group, zoneData);
+				zoneData[ZD_adminShowZone][param1] = swap;
+				SaveZone(group, zoneData);
+			}
+			
+			// Remember this setting for contained clusters too.
+			new iNumClusters = GetArraySize(group[ZG_cluster]);
+			new zoneCluster[ZoneCluster];
+			for(new i=0;i<iNumClusters;i++)
+			{
+				GetZoneClusterByIndex(i, group, zoneCluster);
+				zoneCluster[ZC_adminShowZones][param1] = swap;
+				SaveCluster(group, zoneCluster);
+			}
 			
 			// Show zones right away.
 			if(group[ZG_adminShowZones][param1])
@@ -1243,12 +1278,14 @@ DisplayClusterEditMenu(client)
 	SetMenuExitBackButton(hMenu, true);
 	SetMenuTitle(hMenu, "Manage cluster \"%s\" of group \"%s\"", zoneCluster[ZC_name], group[ZG_name]);
 	
+	new String:sBuffer[64];
 	AddMenuItem(hMenu, "add", "Add zone in cluster");
+	Format(sBuffer, sizeof(sBuffer), "Show zones in this cluster to me: %T", (zoneCluster[ZC_adminShowZones][client]?"Yes":"No"), client);
+	AddMenuItem(hMenu, "show", sBuffer);
 	AddMenuItem(hMenu, "rename", "Rename");
 	AddMenuItem(hMenu, "delete", "Delete");
 	
 	AddMenuItem(hMenu, "", "Zones:", ITEMDRAW_DISABLED);
-	new String:sBuffer[64];
 	new iNumZones = GetArraySize(group[ZG_zones]);
 	new zoneData[ZoneData], iZoneCount;
 	for(new i=0;i<iNumZones;i++)
@@ -1296,6 +1333,29 @@ public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
 			g_ClientMenuState[param1][CMS_addZone] = true;
 			g_ClientMenuState[param1][CMS_editState] = ZES_first;
 			PrintToChat(param1, "Map Zones > Shoot at the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
+		}
+		// Show all zones in this cluster to one admin
+		else if(StrEqual(sInfo, "show"))
+		{
+			new bool:swap = !zoneCluster[ZC_adminShowZones][param1];
+			zoneCluster[ZC_adminShowZones][param1] = swap;
+			SaveCluster(group, zoneCluster);
+			
+			// Set all zones of this cluster to the same state.
+			new iNumZones = GetArraySize(group[ZG_zones]);
+			new zoneData[ZoneData];
+			for(new i=0;i<iNumZones;i++)
+			{
+				GetZoneByIndex(i, group, zoneData);
+				zoneData[ZD_adminShowZone][param1] = swap;
+				SaveZone(group, zoneData);
+			}
+			
+			// Show zones right away.
+			if(zoneCluster[ZC_adminShowZones][param1])
+				TriggerTimer(g_hShowZonesTimer, true);
+			
+			DisplayClusterEditMenu(param1);
 		}
 		// Change the name of the cluster
 		else if(StrEqual(sInfo, "rename"))
@@ -1413,13 +1473,15 @@ DisplayZoneEditMenu(client)
 		SetMenuTitle(hMenu, "Manage zone \"%s\" in cluster \"%s\" of group \"%s\"", zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
 	}
 	
+	new String:sBuffer[128];
 	AddMenuItem(hMenu, "teleport", "Teleport to");
+	Format(sBuffer, sizeof(sBuffer), "Show zone to me: %T", (zoneData[ZD_adminShowZone][client]?"Yes":"No"), client);
+	AddMenuItem(hMenu, "show", sBuffer);
 	AddMenuItem(hMenu, "position1", "Change first corner");
 	AddMenuItem(hMenu, "position2", "Change second corner");
 	AddMenuItem(hMenu, "rotation", "Change rotation");
 	AddMenuItem(hMenu, "center", "Move center of zone");
 	
-	new String:sBuffer[128];
 	if(zoneData[ZD_clusterIndex] == -1)
 		Format(sBuffer, sizeof(sBuffer), "Add to a cluster");
 	else
@@ -1452,6 +1514,16 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 			new Float:vBuf[3];
 			Array_Copy(zoneData[ZD_position], vBuf, 3);
 			TeleportEntity(param1, vBuf, NULL_VECTOR, NULL_VECTOR);
+			DisplayZoneEditMenu(param1);
+		}
+		else if(StrEqual(sInfo, "show"))
+		{
+			new bool:swap = !zoneData[ZD_adminShowZone][param1];
+			zoneData[ZD_adminShowZone][param1] = swap;
+			SaveZone(group, zoneData);
+			
+			if(zoneData[ZD_adminShowZone][param1])
+				TriggerTimer(g_hShowZonesTimer, true);
 			DisplayZoneEditMenu(param1);
 		}
 		// Change one of the 2 positions of the zone
@@ -2634,8 +2706,10 @@ SaveNewZone(client, const String:sName[])
 	if(!g_ClientMenuState[client][CMS_addZone])
 		return;
 
-	new group[ZoneGroup];
+	new group[ZoneGroup], zoneCluster[ZoneCluster];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
+	if(g_ClientMenuState[client][CMS_cluster] != -1)
+		GetZoneClusterByIndex(g_ClientMenuState[client][CMS_cluster], group, zoneCluster);
 	
 	new zoneData[ZoneData];
 	strcopy(zoneData[ZD_name], MAX_ZONE_NAME, sName);
@@ -2645,17 +2719,21 @@ SaveNewZone(client, const String:sName[])
 	// Save the zone in this group.
 	zoneData[ZD_triggerEntity] = INVALID_ENT_REFERENCE;
 	zoneData[ZD_clusterIndex] = g_ClientMenuState[client][CMS_cluster];
+	
+	// Display it right away?
+	if(zoneData[ZD_clusterIndex] == -1)
+		zoneData[ZD_adminShowZone][client] = group[ZG_adminShowZones][client];
+	else
+		zoneData[ZD_adminShowZone][client] = zoneCluster[ZC_adminShowZones][client];
+	
 	zoneData[ZD_index] = GetArraySize(group[ZG_zones]);
 	PushArrayArray(group[ZG_zones], zoneData[0], _:ZoneData);
 	
-	new zoneCluster[ZoneCluster];
-	if(g_ClientMenuState[client][CMS_cluster] == -1)
+	
+	if(zoneData[ZD_clusterIndex] == -1)
 		PrintToChat(client, "Map Zones > Added new zone \"%s\" to group \"%s\".", sName, group[ZG_name]);
 	else
-	{
-		GetZoneClusterByIndex(g_ClientMenuState[client][CMS_cluster], group, zoneCluster);
 		PrintToChat(client, "Map Zones > Added new zone \"%s\" to cluster \"%s\" in group \"%s\".", sName, zoneCluster[ZC_name], group[ZG_name]);
-	}
 	ResetZoneAddingState(client);
 	
 	// Create the trigger.
