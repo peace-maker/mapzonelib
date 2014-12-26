@@ -1038,8 +1038,33 @@ DisplayGroupRootMenu(client, group[ZoneGroup])
 	AddMenuItem(hMenu, "paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
 	AddMenuItem(hMenu, "", "", ITEMDRAW_SPACER|ITEMDRAW_DISABLED);
 	
-	AddMenuItem(hMenu, "zones", "List standalone zones");
-	AddMenuItem(hMenu, "clusters", "List zone clusters");
+	// Show zone count
+	new iNumZones, zoneData[ZoneData];
+	new iSize =GetArraySize(group[ZG_zones]);
+	for(new i=0;i<iSize;i++)
+	{
+		GetZoneByIndex(i, group, zoneData);
+		if(zoneData[ZD_deleted])
+			continue;
+		if(zoneData[ZD_clusterIndex] != -1)
+			continue;
+		iNumZones++;
+	}
+	Format(sBuffer, sizeof(sBuffer), "List standalone zones (%d)", iNumZones);
+	AddMenuItem(hMenu, "zones", sBuffer);
+	
+	// Show cluster count
+	new iNumClusters, zoneCluster[ZoneCluster];
+	iSize = GetArraySize(group[ZG_cluster]);
+	for(new i=0;i<iSize;i++)
+	{
+		GetZoneClusterByIndex(i, group, zoneCluster);
+		if(zoneCluster[ZC_deleted])
+			continue;
+		iNumClusters++;
+	}
+	Format(sBuffer, sizeof(sBuffer), "List zone clusters (%d)", iNumClusters);
+	AddMenuItem(hMenu, "clusters", sBuffer);
 	
 	g_ClientMenuState[client][CMS_group] = group[ZG_index];
 	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
@@ -2318,18 +2343,19 @@ bool:SaveZoneGroupToFile(group[ZoneGroup])
 	decl String:sPath[PLATFORM_MAX_PATH], String:sMap[128];
 	GetCurrentMap(sMap, sizeof(sMap));
 	
+	new iMode = FPERM_U_READ|FPERM_U_WRITE|FPERM_U_EXEC|FPERM_G_READ|FPERM_G_WRITE|FPERM_G_EXEC|FPERM_O_READ|FPERM_O_EXEC;
 	// Have mercy and even create the root config file directory.
 	BuildPath(Path_SM, sPath, sizeof(sPath),  "configs/mapzonelib");
 	if(!DirExists(sPath))
 	{
-		if(!CreateDirectory(sPath, 509)) // mode 0775
+		if(!CreateDirectory(sPath, iMode)) // mode 0775
 			return false;
 	}
 	
 	BuildPath(Path_SM, sPath, sizeof(sPath), "configs/mapzonelib/%s", group[ZG_name]);
 	if(!DirExists(sPath))
 	{
-		if(!CreateDirectory(sPath, 509))
+		if(!CreateDirectory(sPath, iMode))
 			return false;
 	}
 	
