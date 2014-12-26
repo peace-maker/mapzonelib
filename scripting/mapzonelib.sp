@@ -908,6 +908,7 @@ public Action:Timer_ShowZones(Handle:timer)
 			}
 			else
 			{
+				iNumClients = 0;
 				for(new c=1;c<=MaxClients;c++)
 				{
 					if(!IsClientInGame(c))
@@ -1380,6 +1381,9 @@ public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
 			for(new i=0;i<iNumZones;i++)
 			{
 				GetZoneByIndex(i, group, zoneData);
+				if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
+					continue;
+				
 				zoneData[ZD_adminShowZone][param1] = swap;
 				SaveZone(group, zoneData);
 			}
