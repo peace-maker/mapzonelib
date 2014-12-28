@@ -75,6 +75,7 @@ enum ClientClipBoard {
 }
 
 new Handle:g_hCVDebugZones;
+new Handle:g_hCVDebugBeamDistance;
 
 new Handle:g_hfwdOnEnterForward;
 new Handle:g_hfwdOnLeaveForward;
@@ -126,6 +127,7 @@ public OnPluginStart()
 	LoadTranslations("common.phrases");
 	
 	g_hCVDebugZones = CreateConVar("sm_mapzone_debug", "0", "Debug mode. Show all zones by default.", _, true, 0.0, true, 1.0);
+	g_hCVDebugBeamDistance = CreateConVar("sm_mapzone_debug_beamdistance", "5000", "Only show zones that are as close as up to x units to the player.", _, true, 0.0);
 	HookConVarChange(g_hCVDebugZones, ConVar_OnDebugChanged);
 	
 	HookEvent("round_start", Event_OnRoundStart);
@@ -878,12 +880,16 @@ public EntOut_OnTouchEvent(const String:output[], caller, activator, Float:delay
  */
 public Action:Timer_ShowZones(Handle:timer)
 {
+	new Float:fDistanceLimit = GetConVarFloat(g_hCVDebugBeamDistance);
+
 	new iNumGroups = GetArraySize(g_hZoneGroups);
 	new group[ZoneGroup], zoneData[ZoneData], iNumZones;
 	new Float:fPos[3], Float:fMins[3], Float:fMaxs[3], Float:fAngles[3];
 	new iClients[MaxClients], iNumClients;
 	new iColor[4];
 	
+	new Float:vFirstPoint[3], Float:vSecondPoint[3];
+	new Float:fClientAngles[3], Float:fClientEyePosition[3], Float:fClientToZonePoint[3], Float:fLength;
 	for(new i=0;i<iNumGroups;i++)
 	{
 		GetGroupByIndex(i, group);
@@ -901,32 +907,64 @@ public Action:Timer_ShowZones(Handle:timer)
 			Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
 			Array_Copy(zoneData[ZD_rotation], fAngles, 3);
 			
-			// Always show to all!
-			if(group[ZG_showZones])
+			// Get the world coordinates of the corners to check if players could see them.
+			Math_RotateVector(fMins, fAngles, vFirstPoint);
+			AddVectors(vFirstPoint, fPos, vFirstPoint);
+			Math_RotateVector(fMaxs, fAngles, vSecondPoint);
+			AddVectors(vSecondPoint, fPos, vSecondPoint);
+			
+			iNumClients = 0;
+			for(new c=1;c<=MaxClients;c++)
 			{
-				Effect_DrawBeamBoxRotatableToAll(fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, iColor, 0);
-			}
-			else
-			{
-				iNumClients = 0;
-				for(new c=1;c<=MaxClients;c++)
+				if(!IsClientInGame(c) || IsFakeClient(c))
+					continue;
+				
+				if(!group[ZG_showZones] && !zoneData[ZD_adminShowZone][c])
+					continue;
+				
+				// Could the player see the zone?
+				GetClientEyeAngles(c, fClientAngles);
+				GetAngleVectors(fClientAngles, fClientAngles, NULL_VECTOR, NULL_VECTOR);
+				NormalizeVector(fClientAngles, fClientAngles);
+				GetClientEyePosition(c, fClientEyePosition);
+				
+				// TODO: Consider player FOV!
+				// See if the first corner of the zone is in front of the player and near enough.
+				MakeVectorFromPoints(fClientEyePosition, vFirstPoint, fClientToZonePoint);
+				fLength = FloatAbs(GetVectorLength(fClientToZonePoint));
+				NormalizeVector(fClientToZonePoint, fClientToZonePoint);
+				if(GetVectorDotProduct(fClientAngles, fClientToZonePoint) < 0 || fLength > fDistanceLimit)
 				{
-					if(!IsClientInGame(c))
-						continue;
-					
-					if(!zoneData[ZD_adminShowZone][c])
-						continue;
-					
-					iClients[iNumClients++] = c;
+					// First corner is behind the player or too far away..
+					// See if the second corner is in front of the player.
+					MakeVectorFromPoints(fClientEyePosition, vSecondPoint, fClientToZonePoint);
+					fLength = FloatAbs(GetVectorLength(fClientToZonePoint));
+					NormalizeVector(fClientToZonePoint, fClientToZonePoint);
+					if(GetVectorDotProduct(fClientAngles, fClientToZonePoint) < 0 || fLength > fDistanceLimit)
+					{
+						// Second corner is behind the player or too far away..
+						// See if the center is in front of the player.
+						MakeVectorFromPoints(fClientEyePosition, fPos, fClientToZonePoint);
+						fLength = FloatAbs(GetVectorLength(fClientToZonePoint));
+						NormalizeVector(fClientToZonePoint, fClientToZonePoint);
+						if(GetVectorDotProduct(fClientAngles, fClientToZonePoint) < 0 || fLength > fDistanceLimit)
+						{
+							// The zone is completely behind the player. Don't send it to him.
+							continue;
+						}
+					}
 				}
 				
-				if(iNumClients > 0)
-					Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, iColor, 0);
+				// Player wants to see this individual zone or admin enabled showing of all zones to all players.
+				iClients[iNumClients++] = c;
 			}
+			
+			if(iNumClients > 0)
+				Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, iColor, 0);
 		}
 	}
 	
-	new Float:vFirstPoint[3], Float:vSecondPoint[3];
+	
 	for(new i=1;i<=MaxClients;i++)
 	{
 		if(g_ClientMenuState[i][CMS_addZone] && g_ClientMenuState[i][CMS_editState] == ZES_name)
