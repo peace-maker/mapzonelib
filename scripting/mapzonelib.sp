@@ -13,6 +13,7 @@ enum ZoneData {
 	ZD_index,
 	ZD_triggerEntity,
 	ZD_clusterIndex,
+	ZD_teamFilter,
 	Float:ZD_position[3],
 	Float:ZD_mins[3],
 	Float:ZD_maxs[3],
@@ -27,6 +28,7 @@ enum ZoneData {
 enum ZoneCluster {
 	ZC_index,
 	bool:ZC_deleted,
+	ZC_teamFilter,
 	bool:ZC_adminShowZones[MAXPLAYERS+1],  // Just to remember if we want to toggle all zones in this cluster on or off.
 	ZC_clientInZones[MAXPLAYERS+1], // Save for each player in how many zones of this cluster he is.
 	String:ZC_name[MAX_ZONE_NAME]
@@ -37,6 +39,7 @@ enum ZoneGroup {
 	Handle:ZG_zones,
 	Handle:ZG_cluster,
 	Handle:ZG_menuBackForward,
+	ZG_filterEntTeam[2], // Filter entities for teams
 	bool:ZG_showZones,
 	bool:ZG_adminShowZones[MAXPLAYERS+1], // Just to remember if we want to toggle all zones in this group on or off.
 	ZG_defaultColor[4],
@@ -575,6 +578,8 @@ public Native_RegisterZoneGroup(Handle:plugin, numParams)
 	group[ZG_cluster] = CreateArray(_:ZoneCluster);
 	group[ZG_showZones] = GetConVarBool(g_hCVDebugZones);
 	group[ZG_menuBackForward] = INVALID_HANDLE;
+	group[ZG_filterEntTeam][0] = INVALID_ENT_REFERENCE;
+	group[ZG_filterEntTeam][1] = INVALID_ENT_REFERENCE;
 	// Default to red color.
 	group[ZG_defaultColor][0] = 255;
 	group[ZG_defaultColor][3] = 255;
@@ -1378,6 +1383,12 @@ DisplayClusterEditMenu(client)
 	Format(sBuffer, sizeof(sBuffer), "Show zones in this cluster to me: %T", (zoneCluster[ZC_adminShowZones][client]?"Yes":"No"), client);
 	AddMenuItem(hMenu, "show", sBuffer);
 	AddMenuItem(hMenu, "add", "Add zone in cluster");
+	
+	new String:sTeam[32] = "Any";
+	if(zoneCluster[ZC_teamFilter] > 1)
+		GetTeamName(zoneCluster[ZC_teamFilter], sTeam, sizeof(sTeam));
+	Format(sBuffer, sizeof(sBuffer), "Team filter: %s", sTeam);
+	AddMenuItem(hMenu, "team", sBuffer);
 	AddMenuItem(hMenu, "paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
 	AddMenuItem(hMenu, "rename", "Rename");
 	AddMenuItem(hMenu, "delete", "Delete");
@@ -1444,6 +1455,9 @@ public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
 			for(new i=0;i<iNumZones;i++)
 			{
 				GetZoneByIndex(i, group, zoneData);
+				if(zoneData[ZD_deleted])
+					continue;
+				
 				if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
 					continue;
 				
@@ -1454,6 +1468,40 @@ public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
 			// Show zones right away.
 			if(zoneCluster[ZC_adminShowZones][param1])
 				TriggerTimer(g_hShowZonesTimer, true);
+			
+			DisplayClusterEditMenu(param1);
+		}
+		// Toggle team restriction for this cluster
+		else if(StrEqual(sInfo, "team"))
+		{
+			// Loop through all teams
+			new iTeam = zoneCluster[ZC_teamFilter];
+			iTeam++;
+			// Start from the beginning
+			if(iTeam > 3)
+				iTeam = 0;
+			// Skip "spectator"
+			else if(iTeam == 1)
+				iTeam = 2;
+			zoneCluster[ZC_teamFilter] = iTeam;
+			SaveCluster(group, zoneCluster);
+			
+			// Set all zones of this cluster to the same state.
+			new iNumZones = GetArraySize(group[ZG_zones]);
+			new zoneData[ZoneData];
+			for(new i=0;i<iNumZones;i++)
+			{
+				GetZoneByIndex(i, group, zoneData);
+				if(zoneData[ZD_deleted])
+					continue;
+				
+				if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
+					continue;
+				
+				zoneData[ZD_teamFilter] = iTeam;
+				SaveZone(group, zoneData);
+				ApplyTeamRestrictionFilter(group, zoneData);
+			}
 			
 			DisplayClusterEditMenu(param1);
 		}
@@ -1587,6 +1635,12 @@ DisplayZoneEditMenu(client)
 	AddMenuItem(hMenu, "show", sBuffer);
 	AddMenuItem(hMenu, "edit", "Edit zone");
 	
+	new String:sTeam[32] = "Any";
+	if(zoneData[ZD_teamFilter] > 1)
+		GetTeamName(zoneData[ZD_teamFilter], sTeam, sizeof(sTeam));
+	Format(sBuffer, sizeof(sBuffer), "Team filter: %s", sTeam);
+	AddMenuItem(hMenu, "team", sBuffer);
+	
 	if(zoneData[ZD_clusterIndex] == -1)
 		Format(sBuffer, sizeof(sBuffer), "Add to a cluster");
 	else
@@ -1637,6 +1691,24 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 		else if(!StrContains(sInfo, "edit"))
 		{
 			DisplayZoneEditDetailsMenu(param1);
+		}
+		// Toggle team restriction for this zone
+		else if(StrEqual(sInfo, "team"))
+		{
+			// Loop through all teams
+			new iTeam = zoneData[ZD_teamFilter];
+			iTeam++;
+			// Start from the beginning
+			if(iTeam > 3)
+				iTeam = 0;
+			// Skip "spectator"
+			else if(iTeam == 1)
+				iTeam = 2;
+			zoneData[ZD_teamFilter] = iTeam;
+			SaveZone(group, zoneData);
+			ApplyTeamRestrictionFilter(group, zoneData);
+			
+			DisplayZoneEditMenu(param1);
 		}
 		// Change the name of the zone
 		else if(StrEqual(sInfo, "cluster"))
@@ -2335,6 +2407,7 @@ bool:LoadZoneGroup(group[ZoneGroup])
 			// Get the cluster name
 			KvGetString(hKV, "name", sZoneName, sizeof(sZoneName), "unnamed");
 			strcopy(zoneCluster[ZC_name][0], MAX_ZONE_NAME, sZoneName);
+			zoneCluster[ZC_teamFilter] = KvGetNum(hKV, "team");
 			zoneCluster[ZC_index] = GetArraySize(group[ZG_cluster]);
 			PushArrayArray(group[ZG_cluster], zoneCluster[0], _:ZoneCluster);
 			
@@ -2353,6 +2426,8 @@ bool:LoadZoneGroup(group[ZoneGroup])
 		
 		KvGetVector(hKV, "rotation", vBuf);
 		Array_Copy(vBuf, zoneData[ZD_rotation], 3);
+		
+		zoneData[ZD_teamFilter] = KvGetNum(hKV, "team");
 		
 		KvGetString(hKV, "name", sZoneName, sizeof(sZoneName), "unnamed");
 		strcopy(zoneData[ZD_name][0], MAX_ZONE_NAME, sZoneName);
@@ -2418,6 +2493,7 @@ bool:SaveZoneGroupToFile(group[ZoneGroup])
 		Format(sIndex, sizeof(sIndex), "cluster%d", iIndex++);
 		KvJumpToKey(hKV, sIndex, true);
 		KvSetString(hKV, "name", zoneCluster[ZC_name]);
+		KvSetNum(hKV, "team", zoneCluster[ZC_teamFilter]);
 		
 		// Run through all zones and add the ones that belong to this cluster.
 		bZonesAdded |= CreateZoneSectionsInKV(hKV, group, zoneCluster[ZC_index]);
@@ -2470,6 +2546,7 @@ bool:CreateZoneSectionsInKV(Handle:hKV, group[ZoneGroup], iClusterIndex)
 		KvSetVector(hKV, "maxs", vBuf);
 		Array_Copy(zoneData[ZD_rotation], vBuf, 3);
 		KvSetVector(hKV, "rotation", vBuf);
+		KvSetNum(hKV, "team", zoneData[ZD_teamFilter]);
 		KvSetString(hKV, "name", zoneData[ZD_name]);
 		
 		KvGoBack(hKV);
@@ -2550,13 +2627,15 @@ bool:SetupZone(group[ZoneGroup], zoneData[ZoneData])
 	{
 		DispatchKeyValue(iTrigger, "model", "models/error.mdl");
 	}
-
 	
 	zoneData[ZD_triggerEntity] = EntIndexToEntRef(iTrigger);
 	SaveZone(group, zoneData);
 	
 	DispatchSpawn(iTrigger);
-	ActivateEntity(iTrigger);
+	// See if that zone is restricted to one team.
+	if(!ApplyTeamRestrictionFilter(group, zoneData))
+		// Only activate, if we didn't set a filter. Don't need to do it twice.
+		ActivateEntity(iTrigger);
 	
 	// If trigger is rotated consider rotation in traces
 	if(bIsRotated)
@@ -2596,6 +2675,50 @@ ApplyNewTriggerBounds(zoneData[ZoneData])
 	
 	AcceptEntityInput(iTrigger, "Disable");
 	AcceptEntityInput(iTrigger, "Enable");
+}
+
+bool:ApplyTeamRestrictionFilter(group[ZoneGroup], zoneData[ZoneData])
+{
+	new iTrigger = EntRefToEntIndex(zoneData[ZD_triggerEntity]);
+	if(iTrigger == INVALID_ENT_REFERENCE)
+		return false;
+	
+	// See if that zone is restricted to one team.
+	if(zoneData[ZD_teamFilter] >= 2 && zoneData[ZD_teamFilter] <= 3)
+	{
+		new String:sTargetName[64];
+		Format(sTargetName, sizeof(sTargetName), "mapzone_filter_team%d", zoneData[ZD_teamFilter]);
+		if(group[ZG_filterEntTeam][zoneData[ZD_teamFilter]-2] == INVALID_ENT_REFERENCE || EntRefToEntIndex(group[ZG_filterEntTeam][zoneData[ZD_teamFilter]-2]) == INVALID_ENT_REFERENCE)
+		{
+			new iFilter = CreateEntityByName("filter_activator_team");
+			if(iFilter == INVALID_ENT_REFERENCE)
+			{
+				LogError("Can't create filter_activator_team trigger filter entity. Won't create zone %s", zoneData[ZD_name]);
+				AcceptEntityInput(iTrigger, "Kill");
+				zoneData[ZD_triggerEntity] = INVALID_ENT_REFERENCE;
+				SaveZone(group, zoneData);
+				return false;
+			}
+			
+			// Name the filter, so we can set the triggers to use it
+			DispatchKeyValue(iFilter, "targetname", sTargetName);
+			
+			// Set the "filterteam" value
+			SetEntProp(iFilter, Prop_Data, "m_iFilterTeam", zoneData[ZD_teamFilter]);
+			DispatchSpawn(iFilter);
+			ActivateEntity(iFilter);
+			
+			// Save the newly created entity
+			group[ZG_filterEntTeam][zoneData[ZD_teamFilter]-2] = iFilter;
+			SaveGroup(group);
+		}
+		
+		// Set the filter
+		DispatchKeyValue(iTrigger, "filtername", sTargetName);
+		ActivateEntity(iTrigger);
+		return true;
+	}
+	return false;
 }
 
 FindSmallestExistingEncapsulatingTrigger(zoneData[ZoneData])
