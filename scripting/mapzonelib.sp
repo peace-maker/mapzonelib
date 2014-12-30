@@ -2828,6 +2828,13 @@ RemoveClientFromAllZones(client)
 			if(zoneData[ZD_triggerEntity] == INVALID_ENT_REFERENCE)
 				continue;
 			
+			if(!IsClientInGame(client))
+			{
+				zoneData[ZD_clientInZone][client] = false;
+				SaveZone(group, zoneData);
+				continue;
+			}
+			
 			AcceptEntityInput(EntRefToEntIndex(zoneData[ZD_triggerEntity]), "EndTouch", client, client);
 		}
 	}
