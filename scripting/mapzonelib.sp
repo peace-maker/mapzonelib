@@ -2270,10 +2270,10 @@ public Menu_HandleAddFinalization(Handle:menu, MenuAction:action, param1, param2
 	else if(action == MenuAction_Cancel)
 	{
 		ResetZoneAddingState(param1);
-		// In case we were pasting a zone from clipboard.
-		g_ClientMenuState[param1][CMS_editCenter] = false;
 		if(param2 == MenuCancel_ExitBack)
 		{
+			// In case we were pasting a zone from clipboard.
+			g_ClientMenuState[param1][CMS_editCenter] = false;
 			if(g_ClientMenuState[param1][CMS_cluster] != -1)
 			{
 				DisplayClusterEditMenu(param1);
@@ -2288,6 +2288,8 @@ public Menu_HandleAddFinalization(Handle:menu, MenuAction:action, param1, param2
 		// Only reset state, if we didn't type a name in chat!
 		else if(g_ClientMenuState[param1][CMS_zone] == -1)
 		{
+			// In case we were pasting a zone from clipboard.
+			g_ClientMenuState[param1][CMS_editCenter] = false;
 			g_ClientMenuState[param1][CMS_group] = -1;
 			g_ClientMenuState[param1][CMS_cluster] = -1;
 		}
