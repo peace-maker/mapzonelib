@@ -738,7 +738,7 @@ public Native_GetClusterZones(Handle:plugin, numParams)
 		return _:INVALID_HANDLE;
 	
 	new zoneCluster[ZoneCluster];
-	if(!GetZoneClusterByName(sClusterName, group))
+	if(!GetZoneClusterByName(sClusterName, group, zoneCluster))
 		return _:INVALID_HANDLE;
 	
 	new Handle:hZones = CreateArray(ByteCountToCells(MAX_ZONE_NAME));
@@ -2901,13 +2901,15 @@ GetZoneClusterByIndex(iIndex, group[ZoneGroup], zoneCluster[ZoneCluster])
 	GetArrayArray(group[ZG_cluster], iIndex, zoneCluster[0], _:ZoneCluster);
 }
 
-bool:GetZoneClusterByName(const String:sName[], group[ZoneGroup])
+bool:GetZoneClusterByName(const String:sName[], group[ZoneGroup], zoneCluster[ZoneCluster])
 {
 	new iSize = GetArraySize(group[ZG_cluster]);
-	new zoneCluster[ZoneCluster];
 	for(new i=0;i<iSize;i++)
 	{
 		GetZoneClusterByIndex(i, group, zoneCluster);
+		if(zoneCluster[ZC_deleted])
+			continue;
+		
 		if(StrEqual(zoneCluster[ZC_name], sName, false))
 			return true;
 	}
@@ -2921,18 +2923,8 @@ SaveCluster(group[ZoneGroup], zoneCluster[ZoneCluster])
 
 bool:ClusterExistsWithName(group[ZoneGroup], const String:sClusterName[])
 {
-	new iSize = GetArraySize(group[ZG_cluster]);
 	new zoneCluster[ZoneCluster];
-	for(new i=0;i<iSize;i++)
-	{
-		GetZoneClusterByIndex(i, group, zoneCluster);
-		if(zoneCluster[ZC_deleted])
-			continue;
-		
-		if(StrEqual(sClusterName, zoneCluster[ZC_name], false))
-			return true;
-	}
-	return false;
+	return GetZoneClusterByName(sClusterName, group, zoneCluster);
 }
 
 RemoveClientFromAllZones(client)
