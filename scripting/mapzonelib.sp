@@ -632,7 +632,11 @@ public Native_SetMenuBackAction(Handle:plugin, numParams)
 	new String:sName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sName, sizeof(sName));
 	
+#if SOURCEMOD_V_MAJOR >= 1 && SOURCEMOD_V_MINOR >= 7
+	new MapZoneMenuBackCB:callback = MapZoneMenuBackCB:GetNativeFunction(2);
+#else
 	new MapZoneMenuBackCB:callback = MapZoneMenuBackCB:GetNativeCell(2);
+#endif
 	
 	new group[ZoneGroup];
 	if(!GetGroupByName(sName, group))
@@ -676,7 +680,7 @@ public Native_GetGroupZones(Handle:plugin, numParams)
 		if(zoneData[ZD_clusterIndex] != -1)
 			continue;
 		
-		PushArrayArray(hZones, zoneData[ZD_name], ByteCountToCells(MAX_ZONE_NAME));
+		PushArrayArray(hZones, _:zoneData[ZD_name], ByteCountToCells(MAX_ZONE_NAME));
 	}
 	
 	// Only add clusters, if we're told so.
@@ -691,7 +695,7 @@ public Native_GetGroupZones(Handle:plugin, numParams)
 			if(zoneCluster[ZC_deleted])
 				continue;
 			
-			PushArrayArray(hZones, zoneCluster[ZC_name], ByteCountToCells(MAX_ZONE_NAME));
+			PushArrayArray(hZones, _:zoneCluster[ZC_name], ByteCountToCells(MAX_ZONE_NAME));
 		}
 	}
 	
@@ -751,7 +755,7 @@ public Native_GetClusterZones(Handle:plugin, numParams)
 		if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
 			continue;
 		
-		PushArrayArray(hZones, zoneData[ZD_name], ByteCountToCells(MAX_ZONE_NAME));
+		PushArrayArray(hZones, _:zoneData[ZD_name], ByteCountToCells(MAX_ZONE_NAME));
 	}
 	
 	new Handle:hReturn = CloneHandle(hZones, plugin);
