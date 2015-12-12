@@ -3008,8 +3008,42 @@ ClearZonesInGroups()
 	for(new i=0;i<iSize;i++)
 	{
 		GetGroupByIndex(i, group);
+		
+		CloseCustomKVInZones(group);
 		ClearArray(group[ZG_zones]);
+		
+		CloseCustomKVInClusters(group);
 		ClearArray(group[ZG_cluster]);
+	}
+}
+
+CloseCustomKVInZones(group[ZoneGroup])
+{
+	new zoneData[ZoneData];
+	new iSize = GetArraySize(group[ZG_zones]);
+	for(new i=0;i<iSize;i++)
+	{
+		GetZoneByIndex(i, group, zoneData);
+		
+		if (!zoneData[ZD_customKV])
+			continue;
+		
+		CloseHandle(zoneData[ZD_customKV]);
+	}
+}
+
+CloseCustomKVInClusters(group[ZoneGroup])
+{
+	new zoneCluster[ZoneCluster];
+	new iSize = GetArraySize(group[ZG_cluster]);
+	for(new i=0;i<iSize;i++)
+	{
+		GetZoneClusterByIndex(i, group, zoneCluster);
+		
+		if (!zoneCluster[ZC_customKV])
+			continue;
+		
+		CloseHandle(zoneCluster[ZC_customKV]);
 	}
 }
 
