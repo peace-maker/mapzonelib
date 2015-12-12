@@ -173,9 +173,32 @@ public OnMapStart()
 {
 	PrecacheModel("models/error.mdl", true);
 
-	g_iLaserMaterial = PrecacheModel("materials/sprites/laser.vmt", true);
-	g_iHaloMaterial = PrecacheModel("materials/sprites/halo01.vmt", true);
-	g_iGlowSprite = PrecacheModel("sprites/blueglow2.vmt", true);
+	// Don't want to redefine the default sprites.
+	// Borrow them for different games from sm's default funcommands plugin.
+	new Handle:hGameConfig = LoadGameConfigFile("funcommands.games");
+	if (!hGameConfig)
+	{
+		SetFailState("Unable to load game config funcommands.games from stock sourcemod plugin for beam materials.");
+		return;
+	}
+	
+	new String:sBuffer[PLATFORM_MAX_PATH];
+	if (GameConfGetKeyValue(hGameConfig, "SpriteBeam", sBuffer, sizeof(sBuffer)) && sBuffer[0])
+	{
+		g_iLaserMaterial = PrecacheModel(sBuffer, true);
+	}
+	
+	if (GameConfGetKeyValue(hGameConfig, "SpriteHalo", sBuffer, sizeof(sBuffer)) && sBuffer[0])
+	{
+		g_iHaloMaterial = PrecacheModel(sBuffer, true);
+	}
+	
+	if (GameConfGetKeyValue(hGameConfig, "SpriteGlow", sBuffer, sizeof(sBuffer)) && sBuffer[0])
+	{
+		g_iGlowSprite = PrecacheModel(sBuffer, true);
+	}
+	
+	CloseHandle(hGameConfig);
 	
 	// Remove all zones of the old map
 	ClearZonesInGroups();
