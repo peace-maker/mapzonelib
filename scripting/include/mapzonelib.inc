@@ -98,6 +98,29 @@ native bool:MapZone_IsClusteredZone(const String:group[], const String:zoneName[
 native Handle:MapZone_GetClusterZones(const String:group[], const String:clusterName[]);
 
 /**
+ * Get the value of a custom key for a zone or cluster.
+ *
+ * @param group		The zone group name.
+ * @param zoneName	The zone or cluster name.
+ * @param key		The custom key.
+ * @param value		The buffer to store the value in.
+ * @param maxlne	The length of the value buffer.
+ * @return			True if key was found and value was retrieved, false if no group or zone with that name or no keyvalue for that key.
+ */
+native bool:MapZone_GetCustomString(const String:group[], const String:zoneName[], const String:key[], String:value[], maxlen);
+
+/**
+ * Set the value of a custom key for a zone or cluster.
+ *
+ * @param group		The zone group name.
+ * @param zoneName	The zone or cluster name.
+ * @param key		The custom key.
+ * @param value		The new value associated with the key.
+ * @return			True if value was written, false if no group or zone with that name.
+ */
+native bool:MapZone_SetCustomString(const String:group[], const String:zoneName[], const String:key[], const String:value[]);
+
+/**
  * Called when a client enteres a zone.
  * 
  * @param client      The client index.

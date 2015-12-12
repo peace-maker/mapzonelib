@@ -14,6 +14,7 @@ enum ZoneData {
 	ZD_triggerEntity,
 	ZD_clusterIndex,
 	ZD_teamFilter,
+	Handle:ZD_customKV,
 	Float:ZD_position[3],
 	Float:ZD_mins[3],
 	Float:ZD_maxs[3],
@@ -29,6 +30,7 @@ enum ZoneCluster {
 	ZC_index,
 	bool:ZC_deleted,
 	ZC_teamFilter,
+	Handle:ZC_customKV,
 	bool:ZC_adminShowZones[MAXPLAYERS+1],  // Just to remember if we want to toggle all zones in this cluster on or off.
 	ZC_clientInZones[MAXPLAYERS+1], // Save for each player in how many zones of this cluster he is.
 	String:ZC_name[MAX_ZONE_NAME]
@@ -115,6 +117,8 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 	CreateNative("MapZone_GetGroupZones", Native_GetGroupZones);
 	CreateNative("MapZone_IsClusteredZone", Native_IsClusteredZone);
 	CreateNative("MapZone_GetClusterZones", Native_GetClusterZones);
+	CreateNative("MapZone_GetCustomString", Native_GetCustomString);
+	CreateNative("MapZone_SetCustomString", Native_SetCustomString);
 	RegPluginLibrary("mapzonelib");
 	return APLRes_Success;
 }
@@ -762,6 +766,94 @@ public Native_GetClusterZones(Handle:plugin, numParams)
 	CloseHandle(hZones);
 	
 	return _:hReturn;
+}
+
+// native bool:MapZone_GetCustomString(const String:group[], const String:zoneName[], const String:key[], String:value[], maxlen);
+public Native_GetCustomString(Handle:plugin, numParams)
+{
+	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+		return false;
+	
+	new String:sZoneName[MAX_ZONE_NAME];
+	GetNativeString(2, sZoneName, sizeof(sZoneName));
+	
+	// Find a matching cluster or zone.
+	new zoneCluster[ZoneCluster], zoneData[ZoneData];
+	new Handle:hCustomKV;
+	if (GetZoneClusterByName(sZoneName, group, zoneCluster))
+	{
+		hCustomKV = zoneCluster[ZC_customKV];
+	}
+	else if (GetZoneByName(sZoneName, group, zoneData))
+	{
+		hCustomKV = zoneData[ZD_customKV];
+	}
+	
+	// No zone/cluster with this name or no custom key values set.
+	if (!hCustomKV)
+		return false;
+	
+	new String:sKey[128];
+	GetNativeString(3, sKey, sizeof(sKey));
+	new maxlen = GetNativeCell(5);
+	
+	new String:sValue[maxlen];
+	if (!GetTrieString(hCustomKV, sKey, sValue, maxlen))
+		return false;
+	
+	SetNativeString(4, sValue, maxlen);
+	
+	return true;
+}
+
+// native bool:MapZone_SetCustomString(const String:group[], const String:zoneName[], const String:key[], const String:value[]);
+public Native_SetCustomString(Handle:plugin, numParams)
+{
+	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+		return false;
+	
+	new String:sZoneName[MAX_ZONE_NAME];
+	GetNativeString(2, sZoneName, sizeof(sZoneName));
+	
+	// Find a matching cluster or zone.
+	new zoneCluster[ZoneCluster], zoneData[ZoneData];
+	new Handle:hCustomKV;
+	if (GetZoneClusterByName(sZoneName, group, zoneCluster))
+	{
+		if (!zoneCluster[ZC_customKV])
+		{
+			zoneCluster[ZC_customKV] = CreateTrie();
+			SaveCluster(group, zoneCluster);
+		}
+		hCustomKV = zoneCluster[ZC_customKV];
+	}
+	else if (GetZoneByName(sZoneName, group, zoneData))
+	{
+		if (!zoneData[ZD_customKV])
+		{
+			zoneData[ZD_customKV] = CreateTrie();
+			SaveZone(group, zoneData);
+		}
+		hCustomKV = zoneData[ZD_customKV];
+	}
+	
+	// No zone/cluster with this name
+	if (!hCustomKV)
+		return false;
+	
+	new String:sKey[128], String:sValue[256];
+	GetNativeString(3, sKey, sizeof(sKey));
+	GetNativeString(4, sValue, sizeof(sValue));
+
+	return SetTrieString(hCustomKV, sKey, sValue);
 }
 
 /**
@@ -2412,12 +2504,28 @@ bool:LoadZoneGroup(group[ZoneGroup])
 			KvGetString(hKV, "name", sZoneName, sizeof(sZoneName), "unnamed");
 			strcopy(zoneCluster[ZC_name][0], MAX_ZONE_NAME, sZoneName);
 			zoneCluster[ZC_teamFilter] = KvGetNum(hKV, "team");
+			
+			// See if there is a custom keyvalues section for this cluster.
+			if(KvJumpToKey(hKV, "custom", false) && KvGotoFirstSubKey(hKV, false))
+			{
+				zoneCluster[ZC_customKV] = CreateTrie();
+				ParseCustomKeyValues(hKV, zoneCluster[ZC_customKV]);
+				KvGoBack(hKV); // KvGotoFirstSubKey
+				KvGoBack(hKV); // KvJumpToKey
+			}
+			
 			zoneCluster[ZC_index] = GetArraySize(group[ZG_cluster]);
 			PushArrayArray(group[ZG_cluster], zoneCluster[0], _:ZoneCluster);
 			
 			// Step inside this group
 			KvGotoFirstSubKey(hKV);
 		}
+		
+		// Don't parse the custom section as a zone of a cluster.
+		KvGetSectionName(hKV, sBuffer, sizeof(sBuffer));
+		if (StrEqual(sBuffer, "custom", false))
+			continue;
+		
 		new zoneData[ZoneData];
 		KvGetVector(hKV, "pos", vBuf);
 		Array_Copy(vBuf, zoneData[ZD_position], 3);
@@ -2435,6 +2543,20 @@ bool:LoadZoneGroup(group[ZoneGroup])
 		
 		KvGetString(hKV, "name", sZoneName, sizeof(sZoneName), "unnamed");
 		strcopy(zoneData[ZD_name][0], MAX_ZONE_NAME, sZoneName);
+		
+		// See if there is a custom keyvalues section for this zone.
+		// Step inside.
+		if(KvJumpToKey(hKV, "custom", false) && KvGotoFirstSubKey(hKV, false))
+		{
+			//if(zoneCluster[ZC_index] != -1)
+			//{
+			//	LogError("No custom keyvalues allowed in individual cluster zones (%s, %s, %s)", group[ZG_name], zoneCluster[ZC_name], zoneData[ZD_name]);
+			//}
+			zoneData[ZD_customKV] = CreateTrie();
+			ParseCustomKeyValues(hKV, zoneData[ZD_customKV]);
+			KvGoBack(hKV); // KvGotoFirstSubKey
+			KvGoBack(hKV); // KvJumpToKey
+		}
 		
 		zoneData[ZD_clusterIndex] = zoneCluster[ZC_index];
 		
@@ -2455,6 +2577,17 @@ bool:LoadZoneGroup(group[ZoneGroup])
 	
 	CloseHandle(hKV);
 	return true;
+}
+
+ParseCustomKeyValues(Handle:hKV, Handle:hCustomKV)
+{
+	new String:sKey[128], String:sValue[256];
+	do
+	{
+		KvGetSectionName(hKV, sKey, sizeof(sKey));
+		KvGetString(hKV, NULL_STRING, sValue, sizeof(sValue));
+		SetTrieString(hCustomKV, sKey, sValue, true);
+	} while (KvGotoNextKey(hKV, false));
 }
 
 bool:SaveZoneGroupToFile(group[ZoneGroup])
@@ -2498,6 +2631,8 @@ bool:SaveZoneGroupToFile(group[ZoneGroup])
 		KvJumpToKey(hKV, sIndex, true);
 		KvSetString(hKV, "name", zoneCluster[ZC_name]);
 		KvSetNum(hKV, "team", zoneCluster[ZC_teamFilter]);
+		
+		AddCustomKeyValues(hKV, zoneCluster[ZC_customKV]);
 		
 		// Run through all zones and add the ones that belong to this cluster.
 		bZonesAdded |= CreateZoneSectionsInKV(hKV, group, zoneCluster[ZC_index]);
@@ -2553,10 +2688,34 @@ bool:CreateZoneSectionsInKV(Handle:hKV, group[ZoneGroup], iClusterIndex)
 		KvSetNum(hKV, "team", zoneData[ZD_teamFilter]);
 		KvSetString(hKV, "name", zoneData[ZD_name]);
 		
+		AddCustomKeyValues(hKV, zoneData[ZD_customKV]);
+		
 		KvGoBack(hKV);
 	}
 	
 	return bZonesAdded;
+}
+
+AddCustomKeyValues(Handle:hKV, Handle:hCustomKV)
+{
+	if (hCustomKV == INVALID_HANDLE || GetTrieSize(hCustomKV) == 0)
+		return;
+	
+	KvJumpToKey(hKV, "custom", true);
+	
+	new Handle:hTrieSnapshot = CreateTrieSnapshot(hCustomKV);
+	
+	new iSize = TrieSnapshotLength(hTrieSnapshot);
+	new String:sKey[128], String:sValue[256];
+	for (new i=0; i<iSize; i++)
+	{
+		GetTrieSnapshotKey(hTrieSnapshot, i, sKey, sizeof(sKey));
+		GetTrieString(hCustomKV, sKey, sValue, sizeof(sValue));
+		KvSetString(hKV, sKey, sValue);
+	}
+	
+	CloseHandle(hTrieSnapshot);
+	KvGoBack(hKV);
 }
 
 SaveAllZoneGroupsToFile()
@@ -2875,6 +3034,21 @@ GetZoneByIndex(iIndex, group[ZoneGroup], zoneData[ZoneData])
 	GetArrayArray(group[ZG_zones], iIndex, zoneData[0], _:ZoneData);
 }
 
+bool:GetZoneByName(const String:sName[], group[ZoneGroup], zoneData[ZoneData])
+{
+	new iSize = GetArraySize(group[ZG_zones]);
+	for(new i=0;i<iSize;i++)
+	{
+		GetZoneByIndex(i, group, zoneData);
+		if(zoneData[ZD_deleted])
+			continue;
+		
+		if(StrEqual(zoneData[ZD_name], sName, false))
+			return true;
+	}
+	return false;
+}
+
 SaveZone(group[ZoneGroup], zoneData[ZoneData])
 {
 	SetArrayArray(group[ZG_zones], zoneData[ZD_index], zoneData[0], _:ZoneData);
@@ -2882,18 +3056,8 @@ SaveZone(group[ZoneGroup], zoneData[ZoneData])
 
 bool:ZoneExistsWithName(group[ZoneGroup], const String:sZoneName[])
 {
-	new iSize = GetArraySize(group[ZG_zones]);
 	new zoneData[ZoneData];
-	for(new i=0;i<iSize;i++)
-	{
-		GetZoneByIndex(i, group, zoneData);
-		if(zoneData[ZD_deleted])
-			continue;
-		
-		if(StrEqual(sZoneName, zoneData[ZD_name], false))
-			return true;
-	}
-	return false;
+	return GetZoneByName(sZoneName, group, zoneData);
 }
 
 GetZoneClusterByIndex(iIndex, group[ZoneGroup], zoneCluster[ZoneCluster])
