@@ -2480,6 +2480,9 @@ bool:LoadZoneGroup(group[ZoneGroup])
 	if(!hKV)
 		return false;
 	
+	// Allow \" and \n escapeing
+	KvSetEscapeSequences(hKV, true);
+	
 	if(!FileToKeyValues(hKV, sPath))
 		return false;
 	
@@ -2614,6 +2617,9 @@ bool:SaveZoneGroupToFile(group[ZoneGroup])
 	new Handle:hKV = CreateKeyValues("MapZoneGroup");
 	if(!hKV)
 		return false;
+	
+	// Allow \" and \n escapeing
+	KvSetEscapeSequences(hKV, true);
 	
 	// Add all zones of this group to the keyvalues file.
 	// Add normal zones without a cluster first.
