@@ -111,6 +111,8 @@ native bool:MapZone_GetCustomString(const String:group[], const String:zoneName[
 
 /**
  * Set the value of a custom key for a zone or cluster.
+ * When the key is set with an empty string as value,
+ * the key is removed from the zone.
  *
  * @param group		The zone group name.
  * @param zoneName	The zone or cluster name.

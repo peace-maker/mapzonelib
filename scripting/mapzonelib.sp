@@ -882,6 +882,10 @@ public Native_SetCustomString(Handle:plugin, numParams)
 	new String:sKey[128], String:sValue[256];
 	GetNativeString(3, sKey, sizeof(sKey));
 	GetNativeString(4, sValue, sizeof(sValue));
+	
+	// Don't save empty values. Just remove the key then.
+	if (sValue[0] == '\0')
+		return RemoveFromTrie(hCustomKV, sKey);
 
 	return SetTrieString(hCustomKV, sKey, sValue);
 }
