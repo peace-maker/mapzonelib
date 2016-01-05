@@ -149,6 +149,13 @@ public OnPluginStart()
 
 public OnPluginEnd()
 {
+	// Map might not be loaded anymore on server shutdown.
+	// Don't create a ".zones" file. OnMapEnd would have been called before, 
+	// so the zones are saved.
+	new String:sMap[32];
+	if (!GetCurrentMap(sMap, sizeof(sMap)))
+		return;
+	
 	SaveAllZoneGroupsToFile();
 	
 	// Kill all created trigger_multiple.
