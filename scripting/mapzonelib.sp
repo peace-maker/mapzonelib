@@ -2674,7 +2674,8 @@ bool:SaveZoneGroupToFile(group[ZoneGroup])
 	// Only add zones, if there are any for this map.
 	if(bZonesAdded)
 	{
-		KeyValuesToFile(hKV, sPath);
+		if(!KeyValuesToFile(hKV, sPath))
+			LogError("Error saving zones to file %s.", sPath);
 	}
 	else
 	{
@@ -2754,7 +2755,8 @@ SaveAllZoneGroupsToFile()
 	for(new i=0;i<iSize;i++)
 	{
 		GetGroupByIndex(i, group);
-		SaveZoneGroupToFile(group);
+		if(!SaveZoneGroupToFile(group))
+			LogError("Error creating \"configs/mapzonelib/%s/\" folder. Didn't save any zones in that group.", group[ZG_name]);
 	}
 }
 
