@@ -1499,7 +1499,7 @@ DisplayClusterEditMenu(client)
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	GetZoneClusterByIndex(g_ClientMenuState[client][CMS_cluster], group, zoneCluster);
 
-	if(zoneCluster[ZD_deleted])
+	if(zoneCluster[ZC_deleted])
 	{
 		DisplayClusterListMenu(client);
 		return;
@@ -1654,7 +1654,7 @@ public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
 		{
 			decl String:sBuffer[128];
 			new Handle:hPanel = CreatePanel();
-			Format(sBuffer, sizeof(sBuffer), "Do you really want to delete cluster \"%s\" and all containing zones?", zoneCluster[ZD_name]);
+			Format(sBuffer, sizeof(sBuffer), "Do you really want to delete cluster \"%s\" and all containing zones?", zoneCluster[ZC_name]);
 			SetPanelTitle(hPanel, sBuffer);
 			
 			Format(sBuffer, sizeof(sBuffer), "%T", "Yes", param1);
@@ -1856,7 +1856,7 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 			
 				decl String:sBuffer[128];
 				new Handle:hPanel = CreatePanel();
-				Format(sBuffer, sizeof(sBuffer), "Do you really want to remove zone \"%s\" from cluster \"%s\"?", zoneData[ZD_name], zoneCluster[ZD_name]);
+				Format(sBuffer, sizeof(sBuffer), "Do you really want to remove zone \"%s\" from cluster \"%s\"?", zoneData[ZD_name], zoneCluster[ZC_name]);
 				SetPanelTitle(hPanel, sBuffer);
 				
 				Format(sBuffer, sizeof(sBuffer), "%T", "Yes", param1);
