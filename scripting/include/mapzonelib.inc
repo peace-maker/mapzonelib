@@ -162,5 +162,7 @@ public __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_GetGroupZones");
 	MarkNativeAsOptional("MapZone_IsClusteredZone");
 	MarkNativeAsOptional("MapZone_GetClusterZones");
+	MarkNativeAsOptional("MapZone_GetCustomString");
+	MarkNativeAsOptional("MapZone_SetCustomString");
 }
 #endif
