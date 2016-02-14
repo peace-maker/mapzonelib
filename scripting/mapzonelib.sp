@@ -358,7 +358,7 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 			// When pasting a zone from the clipboard, 
 			// we want to edit the center position right away afterwards.
 			if(g_ClientMenuState[client][CMS_editCenter])
-				PrintToChat(client, "Map Zones > Aborted pasting of zone in clipboard.");
+				PrintToChat(client, "Map Zones > Aborted pasting of zone from clipboard.");
 			else
 				PrintToChat(client, "Map Zones > Aborted adding of new zone.");
 			
@@ -373,7 +373,8 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 			}
 			else
 			{
-				DisplayClusterEditMenu(client);
+				// With CMS_cluster set, this adds to the cluster.
+				DisplayZoneListMenu(client);
 			}
 			return Plugin_Handled;
 		}
@@ -1381,8 +1382,22 @@ DisplayZoneListMenu(client)
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 		
 	new Handle:hMenu = CreateMenu(Menu_HandleZoneList);
-	SetMenuTitle(hMenu, "Manage zones for \"%s\"", group[ZG_name]);
+	if(g_ClientMenuState[client][CMS_cluster] == -1)
+	{
+		SetMenuTitle(hMenu, "Manage zones for \"%s\"", group[ZG_name]);
+	}
+	else
+	{
+		// Reuse this menu to add zones to a cluster form the cluster edit menu directly.
+		// It looks the same, is just handled differently.
+		new zoneCluster[ZoneCluster];
+		GetZoneClusterByIndex(g_ClientMenuState[client][CMS_cluster], group, zoneCluster);
+		SetMenuTitle(hMenu, "Add zones to cluster \"%s\"", zoneCluster[ZC_name]);
+	}
 	SetMenuExitBackButton(hMenu, true);
+
+	AddMenuItem(hMenu, "add", "Add new zone");
+	AddMenuItem(hMenu, "", "", ITEMDRAW_SPACER|ITEMDRAW_DISABLED);
 
 	new String:sBuffer[64];
 	new iNumZones = GetArraySize(group[ZG_zones]);
@@ -1421,22 +1436,68 @@ public Menu_HandleZoneList(Handle:menu, MenuAction:action, param1, param2)
 	{
 		new String:sInfo[32];
 		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+
+		if(StrEqual(sInfo, "add"))
+		{
+			g_ClientMenuState[param1][CMS_addZone] = true;
+			g_ClientMenuState[param1][CMS_editState] = ZES_first;
+			PrintToChat(param1, "Map Zones > Shoot at the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
+			return;
+		}
 		
 		new iZoneIndex = StringToInt(sInfo);
-		g_ClientMenuState[param1][CMS_zone] = iZoneIndex;
-		DisplayZoneEditMenu(param1);
+
+		// Normal zone list accessed from the main menu.
+		if(g_ClientMenuState[param1][CMS_cluster] == -1)
+		{
+			g_ClientMenuState[param1][CMS_zone] = iZoneIndex;
+			DisplayZoneEditMenu(param1);
+		}
+		// Zone list accessed from the cluster edit menu.
+		// Add this zone to the cluster.
+		else
+		{
+			new group[ZoneGroup], zoneData[ZoneData];
+			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
+			GetZoneByIndex(iZoneIndex, group, zoneData);
+
+			// TODO: Make sure the cluster wasn't deleted while the menu was open.
+			// Two admins playing against each other?
+			if(zoneData[ZD_deleted])
+			{
+				PrintToChat(param1, "Map Zones > Can't add zone \"%s\", because it got deleted while the menu was open.", zoneData[ZD_name]);
+				DisplayZoneListMenu(param1);
+				return;
+			}
+
+			// Add the zone to the cluster and display the list right again.
+			zoneData[ZD_clusterIndex] = g_ClientMenuState[param1][CMS_cluster];
+			SaveZone(group, zoneData);
+			DisplayZoneListMenu(param1);
+		}
 	}
 	else if(action == MenuAction_Cancel)
 	{
 		if(param2 == MenuCancel_ExitBack)
 		{
-			new group[ZoneGroup];
-			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
-			DisplayGroupRootMenu(param1, group);
+			// Not editing a cluster currently.
+			// Show the root menu again.
+			if(g_ClientMenuState[param1][CMS_cluster] == -1)
+			{
+				new group[ZoneGroup];
+				GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
+				DisplayGroupRootMenu(param1, group);
+			}
+			else
+			{
+				// We came here from the cluster edit menu. Go back there.
+				DisplayClusterEditMenu(param1);
+			}
 		}
 		else
 		{
 			g_ClientMenuState[param1][CMS_group] = -1;
+			g_ClientMenuState[param1][CMS_cluster] = -1;
 		}
 	}
 }
@@ -1524,6 +1585,7 @@ DisplayClusterEditMenu(client)
 
 	if(zoneCluster[ZC_deleted])
 	{
+		g_ClientMenuState[client][CMS_cluster] = -1;
 		DisplayClusterListMenu(client);
 		return;
 	}
@@ -1535,7 +1597,7 @@ DisplayClusterEditMenu(client)
 	new String:sBuffer[64];
 	Format(sBuffer, sizeof(sBuffer), "Show zones in this cluster to me: %T", (zoneCluster[ZC_adminShowZones][client]?"Yes":"No"), client);
 	AddMenuItem(hMenu, "show", sBuffer);
-	AddMenuItem(hMenu, "add", "Add zone in cluster");
+	AddMenuItem(hMenu, "add", "Add zone to cluster");
 	
 	new String:sTeam[32] = "Any";
 	if(zoneCluster[ZC_teamFilter] > 1)
@@ -1591,9 +1653,7 @@ public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
 		// Add new zone in the cluster
 		if(StrEqual(sInfo, "add"))
 		{
-			g_ClientMenuState[param1][CMS_addZone] = true;
-			g_ClientMenuState[param1][CMS_editState] = ZES_first;
-			PrintToChat(param1, "Map Zones > Shoot at the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
+			DisplayZoneListMenu(param1);
 		}
 		// Show all zones in this cluster to one admin
 		else if(StrEqual(sInfo, "show"))
