@@ -395,12 +395,19 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 	}
 	else if(g_ClientMenuState[client][CMS_addCluster])
 	{
+		// We can get here when adding a cluster through the Cluster List menu from the main menu
+		// or when adding a zone to a cluster and adding a new cluster this zone should be part of right away.
+		new bool:bIsEditingZone = g_ClientMenuState[client][CMS_zone] != -1;
+		
 		if(!StrContains(sArgs, "!abort"))
 		{
 			g_ClientMenuState[client][CMS_addCluster] = false;
 			
 			PrintToChat(client, "Map Zones > Aborted adding of new cluster.");
-			DisplayClusterListMenu(client);
+			if (bIsEditingZone)
+				DisplayClusterSelectionMenu(client);
+			else
+				DisplayClusterListMenu(client);
 			return Plugin_Handled;
 		}
 		
@@ -427,9 +434,25 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 		zoneCluster[ZC_index] = GetArraySize(group[ZG_cluster]);
 		PushArrayArray(group[ZG_cluster], zoneCluster[0], _:ZoneCluster);
 		
-		PrintToChat(client, "Map Zones > Added new cluster %s.", zoneCluster[ZC_name]);
-		g_ClientMenuState[client][CMS_cluster] = zoneCluster[ZC_index];
-		DisplayClusterEditMenu(client);
+		PrintToChat(client, "Map Zones > Added new cluster \"%s\".", zoneCluster[ZC_name]);
+		
+		// Add the currently edited zone to the new cluster right away.
+		if (bIsEditingZone)
+		{
+			new zoneData[ZoneData];
+			GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
+
+			PrintToChat(client, "Map Zones > Zone \"%s\" is now part of cluster \"%s\".", zoneData[ZD_name], zoneCluster[ZC_name]);
+		
+			zoneData[ZD_clusterIndex] = zoneCluster[ZC_index];
+			SaveZone(group, zoneData);
+			DisplayZoneEditMenu(client);
+		}
+		else
+		{
+			g_ClientMenuState[client][CMS_cluster] = zoneCluster[ZC_index];
+			DisplayClusterEditMenu(client);
+		}
 		return Plugin_Handled;
 	}
 	return Plugin_Continue;
@@ -1751,11 +1774,11 @@ DisplayZoneEditMenu(client)
 	
 	new Handle:hMenu = CreateMenu(Menu_HandleZoneEdit);
 	SetMenuExitBackButton(hMenu, true);
-	if(g_ClientMenuState[client][CMS_cluster] == -1)
+	if(zoneData[ZD_clusterIndex] == -1)
 		SetMenuTitle(hMenu, "Manage zone \"%s\" in group \"%s\"", zoneData[ZD_name], group[ZG_name]);
 	else
 	{
-		GetZoneClusterByIndex(g_ClientMenuState[client][CMS_cluster], group, zoneCluster);
+		GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
 		SetMenuTitle(hMenu, "Manage zone \"%s\" in cluster \"%s\" of group \"%s\"", zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
 	}
 	
@@ -2025,6 +2048,9 @@ DisplayClusterSelectionMenu(client)
 	SetMenuTitle(hMenu, "Add zone \"%s\" to cluster:", zoneData[ZD_name]);
 	SetMenuExitBackButton(hMenu, true);
 
+	AddMenuItem(hMenu, "newcluster", "Add new cluster");
+	AddMenuItem(hMenu, "", "", ITEMDRAW_SPACER|ITEMDRAW_DISABLED);
+	
 	new iNumClusters = GetArraySize(group[ZG_cluster]);
 	new zoneCluster[ZoneCluster], String:sIndex[16], iClusterCount;
 	for(new i=0;i<iNumClusters;i++)
@@ -2055,6 +2081,13 @@ public Menu_HandleClusterSelection(Handle:menu, MenuAction:action, param1, param
 	{
 		new String:sInfo[32];
 		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		
+		if (StrEqual(sInfo, "newcluster"))
+		{
+			PrintToChat(param1, "Map Zones > Enter name of new cluster in chat. Type \"!abort\" to abort.");
+			g_ClientMenuState[param1][CMS_addCluster] = true;
+			return;
+		}
 		
 		new group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
