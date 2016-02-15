@@ -1457,8 +1457,9 @@ public Menu_HandleZoneList(Handle:menu, MenuAction:action, param1, param2)
 		// Add this zone to the cluster.
 		else
 		{
-			new group[ZoneGroup], zoneData[ZoneData];
+			new group[ZoneGroup], zoneCluster[ZoneCluster], zoneData[ZoneData];
 			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
+			GetZoneClusterByIndex(g_ClientMenuState[param1][CMS_cluster], group, zoneCluster);
 			GetZoneByIndex(iZoneIndex, group, zoneData);
 
 			// TODO: Make sure the cluster wasn't deleted while the menu was open.
@@ -1471,8 +1472,10 @@ public Menu_HandleZoneList(Handle:menu, MenuAction:action, param1, param2)
 			}
 
 			// Add the zone to the cluster and display the list right again.
+			// TODO: Check if the zone was in a cluster before and evaluate again, if the client is still in the old cluster?
 			zoneData[ZD_clusterIndex] = g_ClientMenuState[param1][CMS_cluster];
 			SaveZone(group, zoneData);
+			PrintToChat(param1, "Map Zones > Added zone \"%s\" to cluster \"%s\" in group \"%s\".", zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
 			DisplayZoneListMenu(param1);
 		}
 	}
@@ -1737,6 +1740,7 @@ public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
 		{
 			decl String:sBuffer[128];
 			new Handle:hPanel = CreatePanel();
+			// TODO: Add option to keep contained zones.
 			Format(sBuffer, sizeof(sBuffer), "Do you really want to delete cluster \"%s\" and all containing zones?", zoneCluster[ZC_name]);
 			SetPanelTitle(hPanel, sBuffer);
 			
