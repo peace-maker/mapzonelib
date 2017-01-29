@@ -64,6 +64,16 @@ native bool:MapZone_SetMenuBackAction(const String:group[], MapZoneMenuBackCB:ca
 native bool:MapZone_SetZoneDefaultColor(const String:group[], const iColor[4]);
 
 /**
+ * Set the color of the zone.
+ *
+ * @param zoneName  The zone group name.
+ * @param group     The zone or cluster name.
+ * @param iColor    The RGBA colors of the laser.
+ * @return          True if set, false if no zone group or zone with that name.
+ */
+native bool:MapZone_SetZoneColor(const String:group[], const String:zoneName[], const iColor[4]);
+
+/**
  * Get an adt_array of zone (and cluster) names of this group.
  * Zone names are at most MAX_ZONE_NAME long.
  * 
@@ -159,6 +169,8 @@ public __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_RegisterZoneGroup");
 	MarkNativeAsOptional("MapZone_ShowMenu");
 	MarkNativeAsOptional("MapZone_SetMenuBackAction");
+	MarkNativeAsOptional("MapZone_SetZoneDefaultColor");
+	MarkNativeAsOptional("MapZone_SetZoneColor");
 	MarkNativeAsOptional("MapZone_GetGroupZones");
 	MarkNativeAsOptional("MapZone_IsClusteredZone");
 	MarkNativeAsOptional("MapZone_GetClusterZones");

@@ -14,6 +14,7 @@ enum ZoneData {
 	ZD_triggerEntity,
 	ZD_clusterIndex,
 	ZD_teamFilter,
+	ZD_color[4],
 	Handle:ZD_customKV,
 	Float:ZD_position[3],
 	Float:ZD_mins[3],
@@ -30,6 +31,7 @@ enum ZoneCluster {
 	ZC_index,
 	bool:ZC_deleted,
 	ZC_teamFilter,
+	ZC_color[4],
 	Handle:ZC_customKV,
 	bool:ZC_adminShowZones[MAXPLAYERS+1],  // Just to remember if we want to toggle all zones in this cluster on or off.
 	ZC_clientInZones[MAXPLAYERS+1], // Save for each player in how many zones of this cluster he is.
@@ -114,6 +116,7 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 	CreateNative("MapZone_ShowMenu", Native_ShowMenu);
 	CreateNative("MapZone_SetMenuBackAction", Native_SetMenuBackAction);
 	CreateNative("MapZone_SetZoneDefaultColor", Native_SetZoneDefaultColor);
+	CreateNative("MapZone_SetZoneColor", Native_SetZoneColor);
 	CreateNative("MapZone_GetGroupZones", Native_GetGroupZones);
 	CreateNative("MapZone_IsClusteredZone", Native_IsClusteredZone);
 	CreateNative("MapZone_GetClusterZones", Native_GetClusterZones);
@@ -432,6 +435,8 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 		
 		new zoneCluster[ZoneCluster];
 		strcopy(zoneCluster[ZC_name], MAX_ZONE_NAME, sArgs);
+		// Don't use a seperate color for this cluster by default.
+		zoneCluster[ZC_color][0] = -1;
 		zoneCluster[ZC_index] = GetArraySize(group[ZG_cluster]);
 		PushArrayArray(group[ZG_cluster], zoneCluster[0], _:ZoneCluster);
 		
@@ -682,6 +687,40 @@ public Native_SetZoneDefaultColor(Handle:plugin, numParams)
 	SaveGroup(group);
 	
 	return true;
+}
+
+// native bool:MapZone_SetZoneColor(const String:group[], const String:zoneName[], const iColor[4]);
+public Native_SetZoneColor(Handle:plugin, numParams)
+{
+	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+		return false;
+	
+	new String:sZoneName[MAX_ZONE_NAME];
+	GetNativeString(2, sZoneName, sizeof(sZoneName));
+	
+	new iColor[4];
+	GetNativeArray(3, iColor, 4);
+	
+	// Find a matching cluster or zone.
+	new zoneCluster[ZoneCluster], zoneData[ZoneData];
+	if (GetZoneClusterByName(sZoneName, group, zoneCluster))
+	{
+		Array_Copy(iColor, zoneCluster[ZC_color], 4);
+		SaveCluster(group, zoneCluster);
+		return true;
+	}
+	else if (GetZoneByName(sZoneName, group, zoneData))
+	{
+		Array_Copy(iColor, zoneData[ZD_color], 4);
+		SaveZone(group, zoneData);
+		return true;
+	}
+		
+	return false;
 }
 
 // native bool:MapZone_SetMenuBackAction(const String:group[], MapZoneMenuBackCB:callback);
@@ -1042,10 +1081,10 @@ public Action:Timer_ShowZones(Handle:timer)
 	new Float:fDistanceLimit = GetConVarFloat(g_hCVDebugBeamDistance);
 
 	new iNumGroups = GetArraySize(g_hZoneGroups);
-	new group[ZoneGroup], zoneData[ZoneData], iNumZones;
+	new group[ZoneGroup], zoneCluster[ZoneCluster], zoneData[ZoneData], iNumZones;
 	new Float:fPos[3], Float:fMins[3], Float:fMaxs[3], Float:fAngles[3];
 	new iClients[MaxClients], iNumClients;
-	new iColor[4];
+	new iDefaultColor[4], iColor[4];
 	
 	new Float:vFirstPoint[3], Float:vSecondPoint[3];
 	new Float:fClientAngles[3], Float:fClientEyePosition[3], Float:fClientToZonePoint[3], Float:fLength;
@@ -1053,7 +1092,7 @@ public Action:Timer_ShowZones(Handle:timer)
 	{
 		GetGroupByIndex(i, group);
 		
-		Array_Copy(group[ZG_defaultColor], iColor, 4);
+		Array_Copy(group[ZG_defaultColor], iDefaultColor, 4);
 		iNumZones = GetArraySize(group[ZG_zones]);
 		for(new z=0;z<iNumZones;z++)
 		{
@@ -1065,6 +1104,31 @@ public Action:Timer_ShowZones(Handle:timer)
 			Array_Copy(zoneData[ZD_mins], fMins, 3);
 			Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
 			Array_Copy(zoneData[ZD_rotation], fAngles, 3);
+			
+			// Use the custom color of the zone if set.
+			if (zoneData[ZD_color][0] >= 0)
+			{
+				Array_Copy(zoneData[ZD_color], iColor, 4);
+			}
+			// Use the custom color of the cluster if set.
+			else if (zoneData[ZD_clusterIndex] != -1)
+			{
+				GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
+				if (zoneCluster[ZC_color][0] >= 0)
+				{
+					Array_Copy(zoneCluster[ZC_color], iColor, 4);
+				}
+				// Use default if cluster doesn't have an own color.
+				else
+				{
+					Array_Copy(iDefaultColor, iColor, 4);
+				}
+			}
+			// Use the default color of the group, if not overwritten.
+			else
+			{
+				Array_Copy(iDefaultColor, iColor, 4);
+			}
 			
 			// Get the world coordinates of the corners to check if players could see them.
 			Math_RotateVector(fMins, fAngles, vFirstPoint);
@@ -1119,7 +1183,7 @@ public Action:Timer_ShowZones(Handle:timer)
 			}
 			
 			if(iNumClients > 0)
-				Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, iColor, 0);
+				Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, iColor, 5);
 		}
 	}
 	
@@ -1227,12 +1291,12 @@ DisplayGroupRootMenu(client, group[ZoneGroup])
 		SetMenuExitBackButton(hMenu, true);
 	
 	new String:sBuffer[64];
+	AddMenuItem(hMenu, "add", "Add new zone");
+	AddMenuItem(hMenu, "paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
 	Format(sBuffer, sizeof(sBuffer), "Show Zones to all: %T", (group[ZG_showZones]?"Yes":"No"), client);
 	AddMenuItem(hMenu, "showzonesall", sBuffer);
 	Format(sBuffer, sizeof(sBuffer), "Show Zones to me only: %T", (group[ZG_adminShowZones][client]?"Yes":"No"), client);
 	AddMenuItem(hMenu, "showzonesme", sBuffer);
-	AddMenuItem(hMenu, "add", "Add new zone");
-	AddMenuItem(hMenu, "paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
 	AddMenuItem(hMenu, "", "", ITEMDRAW_SPACER|ITEMDRAW_DISABLED);
 	
 	// Show zone count
@@ -2675,6 +2739,10 @@ bool:LoadZoneGroup(group[ZoneGroup])
 		
 		zoneData[ZD_teamFilter] = KvGetNum(hKV, "team");
 		
+		new iColor[4] = {-1, -1, -1, -1};
+		KvGetColor(hKV, "color", iColor[0], iColor[1], iColor[2], iColor[3]);
+		Array_Copy(vBuf, zoneData[ZD_color], 4);
+		
 		KvGetString(hKV, "name", sZoneName, sizeof(sZoneName), "unnamed");
 		strcopy(zoneData[ZD_name][0], MAX_ZONE_NAME, sZoneName);
 		
@@ -2824,6 +2892,9 @@ bool:CreateZoneSectionsInKV(Handle:hKV, group[ZoneGroup], iClusterIndex)
 		Array_Copy(zoneData[ZD_rotation], vBuf, 3);
 		KvSetVector(hKV, "rotation", vBuf);
 		KvSetNum(hKV, "team", zoneData[ZD_teamFilter]);
+		// Only set the color to the KV if it was set.
+		if (zoneData[ZD_color][0] >= 0)
+			KvSetColor(hKV, "color", zoneData[ZD_color][0], zoneData[ZD_color][1], zoneData[ZD_color][2], zoneData[ZD_color][3]);
 		KvSetString(hKV, "name", zoneData[ZD_name]);
 		
 		AddCustomKeyValues(hKV, zoneData[ZD_customKV]);
@@ -3382,6 +3453,9 @@ SaveNewZone(client, const String:sName[])
 		zoneData[ZD_adminShowZone][client] = group[ZG_adminShowZones][client];
 	else
 		zoneData[ZD_adminShowZone][client] = zoneCluster[ZC_adminShowZones][client];
+	
+	// Don't use a seperate color for this zone.
+	zoneData[ZD_color][0] = -1;
 	
 	zoneData[ZD_index] = GetArraySize(group[ZG_zones]);
 	PushArrayArray(group[ZG_zones], zoneData[0], _:ZoneData);
