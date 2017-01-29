@@ -81,7 +81,7 @@ enum ClientClipBoard {
 	String:CB_name[MAX_ZONE_NAME]
 }
 
-new Handle:g_hCVDebugZones;
+new Handle:g_hCVShowZonesDefault;
 new Handle:g_hCVDebugBeamDistance;
 
 new Handle:g_hfwdOnEnterForward;
@@ -117,6 +117,7 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 	CreateNative("MapZone_SetMenuBackAction", Native_SetMenuBackAction);
 	CreateNative("MapZone_SetZoneDefaultColor", Native_SetZoneDefaultColor);
 	CreateNative("MapZone_SetZoneColor", Native_SetZoneColor);
+	CreateNative("MapZone_SetClientZoneVisibility", Native_SetClientZoneVisibility);
 	CreateNative("MapZone_GetGroupZones", Native_GetGroupZones);
 	CreateNative("MapZone_IsClusteredZone", Native_IsClusteredZone);
 	CreateNative("MapZone_GetClusterZones", Native_GetClusterZones);
@@ -136,9 +137,9 @@ public OnPluginStart()
 	
 	LoadTranslations("common.phrases");
 	
-	g_hCVDebugZones = CreateConVar("sm_mapzone_debug", "0", "Debug mode. Show all zones by default.", _, true, 0.0, true, 1.0);
+	g_hCVShowZonesDefault = CreateConVar("sm_mapzone_showzones", "0", "Show all zones to all players by default?", _, true, 0.0, true, 1.0);
 	g_hCVDebugBeamDistance = CreateConVar("sm_mapzone_debug_beamdistance", "5000", "Only show zones that are as close as up to x units to the player.", _, true, 0.0);
-	HookConVarChange(g_hCVDebugZones, ConVar_OnDebugChanged);
+	HookConVarChange(g_hCVShowZonesDefault, ConVar_OnDebugChanged);
 	
 	HookEvent("round_start", Event_OnRoundStart);
 	HookEvent("bullet_impact", Event_OnBulletImpact);
@@ -537,7 +538,7 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 
 public ConVar_OnDebugChanged(Handle:convar, const String:oldValue[], const String:newValue[])
 {
-	new bool:bShowZones = GetConVarBool(g_hCVDebugZones);
+	new bool:bShowZones = GetConVarBool(g_hCVShowZonesDefault);
 	new iSize = GetArraySize(g_hZoneGroups);
 	new group[ZoneGroup];
 	for(new i=0;i<iSize;i++)
@@ -639,7 +640,7 @@ public Native_RegisterZoneGroup(Handle:plugin, numParams)
 	strcopy(group[ZG_name][0], MAX_ZONE_GROUP_NAME, sName);
 	group[ZG_zones] = CreateArray(_:ZoneData);
 	group[ZG_cluster] = CreateArray(_:ZoneCluster);
-	group[ZG_showZones] = GetConVarBool(g_hCVDebugZones);
+	group[ZG_showZones] = GetConVarBool(g_hCVShowZonesDefault);
 	group[ZG_menuBackForward] = INVALID_HANDLE;
 	group[ZG_filterEntTeam][0] = INVALID_ENT_REFERENCE;
 	group[ZG_filterEntTeam][1] = INVALID_ENT_REFERENCE;
@@ -658,6 +659,11 @@ public Native_RegisterZoneGroup(Handle:plugin, numParams)
 public Native_ShowMenu(Handle:plugin, numParams)
 {
 	new client = GetNativeCell(1);
+	if (client <= 0 || client > MaxClients || !IsClientInGame(client))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d)", client);
+		return false;
+	}
 
 	new String:sName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(2, sName, sizeof(sName));
@@ -716,6 +722,62 @@ public Native_SetZoneColor(Handle:plugin, numParams)
 	else if (GetZoneByName(sZoneName, group, zoneData))
 	{
 		Array_Copy(iColor, zoneData[ZD_color], 4);
+		SaveZone(group, zoneData);
+		return true;
+	}
+		
+	return false;
+}
+
+// native bool:MapZone_SetClientZoneVisibility(const String:group[], const String:zoneName[], client, bool bVisible);
+public Native_SetClientZoneVisibility(Handle:plugin, numParams)
+{
+	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+		return false;
+	
+	new String:sZoneName[MAX_ZONE_NAME];
+	GetNativeString(2, sZoneName, sizeof(sZoneName));
+	
+	new client = GetNativeCell(3);
+	if (client <= 0 || client > MaxClients || !IsClientInGame(client))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d)", client);
+		return false;
+	}
+	
+	new bool:bVisible = bool:GetNativeCell(4);
+	
+	// Find a matching cluster or zone.
+	new zoneCluster[ZoneCluster], zoneData[ZoneData];
+	if (GetZoneClusterByName(sZoneName, group, zoneCluster))
+	{
+		zoneCluster[ZC_adminShowZones][client] = bVisible;
+		SaveCluster(group, zoneCluster);
+		
+		// Set all zones of this cluster to the same state.
+		new iNumZones = GetArraySize(group[ZG_zones]);
+		for(new i=0;i<iNumZones;i++)
+		{
+			GetZoneByIndex(i, group, zoneData);
+			if(zoneData[ZD_deleted])
+				continue;
+			
+			if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
+				continue;
+			
+			zoneData[ZD_adminShowZone][client] = bVisible;
+			SaveZone(group, zoneData);
+		}
+		
+		return true;
+	}
+	else if (GetZoneByName(sZoneName, group, zoneData))
+	{
+		zoneData[ZD_adminShowZone][client] = bVisible;
 		SaveZone(group, zoneData);
 		return true;
 	}

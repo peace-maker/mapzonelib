@@ -74,6 +74,18 @@ native bool:MapZone_SetZoneDefaultColor(const String:group[], const iColor[4]);
 native bool:MapZone_SetZoneColor(const String:group[], const String:zoneName[], const iColor[4]);
 
 /**
+ * Show or hide a zone per client.
+ *
+ * @param zoneName  The zone group name.
+ * @param group     The zone or cluster name.
+ * @param client    The client to change the visibility of the zone for.
+ * @param bVisible  True to show the zone to the client, false to hide.
+ * @return          True when changed, false if no zone group or zone with that name.
+ * @error           Invalid client index.
+ */
+native bool:MapZone_SetClientZoneVisibility(const String:group[], const String:zoneName[], client, bool bVisible);
+
+/**
  * Get an adt_array of zone (and cluster) names of this group.
  * Zone names are at most MAX_ZONE_NAME long.
  * 
