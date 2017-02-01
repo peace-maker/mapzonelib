@@ -2879,9 +2879,11 @@ bool:LoadZoneGroup(group[ZoneGroup])
 			strcopy(zoneCluster[ZC_name][0], MAX_ZONE_NAME, sZoneName);
 			zoneCluster[ZC_teamFilter] = KvGetNum(hKV, "team");
 			
-			new iColor[4] = {-1, -1, -1, -1};
+			new iColor[4];
 			KvGetColor(hKV, "color", iColor[0], iColor[1], iColor[2], iColor[3]);
-			Array_Copy(vBuf, zoneCluster[ZC_color], 4);
+			if (iColor[0] == 0 && iColor[1] == 0 && iColor[2] == 0 && iColor[3] == 0)
+				Array_Fill(iColor, sizeof(iColor), -1);
+			Array_Copy(iColor, zoneCluster[ZC_color], sizeof(iColor));
 			
 			// See if there is a custom keyvalues section for this cluster.
 			if(KvJumpToKey(hKV, "custom", false) && KvGotoFirstSubKey(hKV, false))
@@ -2919,9 +2921,11 @@ bool:LoadZoneGroup(group[ZoneGroup])
 		
 		zoneData[ZD_teamFilter] = KvGetNum(hKV, "team");
 		
-		new iColor[4] = {-1, -1, -1, -1};
+		new iColor[4];
 		KvGetColor(hKV, "color", iColor[0], iColor[1], iColor[2], iColor[3]);
-		Array_Copy(vBuf, zoneData[ZD_color], 4);
+		if (iColor[0] == 0 && iColor[1] == 0 && iColor[2] == 0 && iColor[3] == 0)
+				Array_Fill(iColor, sizeof(iColor), -1);
+		Array_Copy(iColor, zoneData[ZD_color], sizeof(iColor));
 		
 		KvGetString(hKV, "name", sZoneName, sizeof(sZoneName), "unnamed");
 		strcopy(zoneData[ZD_name][0], MAX_ZONE_NAME, sZoneName);
@@ -3016,6 +3020,9 @@ bool:SaveZoneGroupToFile(group[ZoneGroup])
 		KvJumpToKey(hKV, sIndex, true);
 		KvSetString(hKV, "name", zoneCluster[ZC_name]);
 		KvSetNum(hKV, "team", zoneCluster[ZC_teamFilter]);
+		// Only set the color to the KV if it was set.
+		if (zoneCluster[ZC_color][0] >= 0)
+			KvSetColor(hKV, "color", zoneCluster[ZC_color][0], zoneCluster[ZC_color][1], zoneCluster[ZC_color][2], zoneCluster[ZC_color][3]);
 		
 		AddCustomKeyValues(hKV, zoneCluster[ZC_customKV]);
 		
