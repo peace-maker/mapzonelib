@@ -56,6 +56,12 @@ enum ZoneEditState {
 	ZES_name
 }
 
+enum ZonePreviewMode {
+	ZPM_disabled,
+	ZPM_aim,
+	ZPM_feet
+}
+
 enum ClientMenuState {
 	CMS_group,
 	CMS_cluster,
@@ -67,6 +73,7 @@ enum ClientMenuState {
 	bool:CMS_editCenter,
 	bool:CMS_editPosition,
 	ZoneEditState:CMS_editState,
+	ZonePreviewMode:CMS_previewMode,
 	Float:CMS_first[3],
 	Float:CMS_second[3],
 	Float:CMS_rotation[3],
@@ -100,6 +107,8 @@ new Handle:g_hZoneGroups;
 new g_ClientMenuState[MAXPLAYERS+1][ClientMenuState];
 // Copy & paste zones even over different groups.
 new g_Clipboard[MAXPLAYERS+1][ClientClipBoard];
+// Show the crosshair and current zone while adding/editing a zone.
+new Handle:g_hShowZoneWhileEditTimer[MAXPLAYERS+1];
 
 public Plugin:myinfo = 
 {
@@ -237,6 +246,7 @@ public OnClientDisconnect(client)
 	g_ClientMenuState[client][CMS_editRotation] = false;
 	g_ClientMenuState[client][CMS_editCenter] = false;
 	g_ClientMenuState[client][CMS_editPosition] = false;
+	g_ClientMenuState[client][CMS_previewMode] = ZPM_aim;
 	Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
 	Array_Fill(g_ClientMenuState[client][CMS_center], 3, 0.0);
 	ResetZoneAddingState(client);
@@ -1252,18 +1262,7 @@ public Action:Timer_ShowZones(Handle:timer)
 	
 	for(new i=1;i<=MaxClients;i++)
 	{
-		if(g_ClientMenuState[i][CMS_addZone] && g_ClientMenuState[i][CMS_editState] == ZES_name)
-		{
-			for(new a=0;a<3;a++)
-			{
-				vFirstPoint[a] = g_ClientMenuState[i][CMS_first][a];
-				vSecondPoint[a] = g_ClientMenuState[i][CMS_second][a];
-			}
-			
-			Effect_DrawBeamBoxToClient(i, vFirstPoint, vSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, {0,0,255,255}, 0);
-		}
-		
-		else if(g_ClientMenuState[i][CMS_editPosition]
+		if(g_ClientMenuState[i][CMS_editPosition]
 		|| g_ClientMenuState[i][CMS_editRotation]
 		|| g_ClientMenuState[i][CMS_editCenter])
 		{
@@ -1320,6 +1319,94 @@ public Action:Timer_ShowZones(Handle:timer)
 	}
 	
 	return Plugin_Continue;
+}
+
+public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
+{
+	new client = GetClientOfUserId(userid);
+	if (!client)
+		return Plugin_Stop;
+	
+	// Don't show temporary stuff anymore when done with both corners.
+	if(g_ClientMenuState[client][CMS_editState] == ZES_name)
+	{
+		// Keep drawing the new zone while he enters a name for it.
+		if (g_ClientMenuState[client][CMS_addZone])
+		{
+			new Float:fFirstPoint[3], Float:fSecondPoint[3];
+			Array_Copy(g_ClientMenuState[client][CMS_first], fFirstPoint, 3);
+			Array_Copy(g_ClientMenuState[client][CMS_second], fSecondPoint, 3);
+			
+			Effect_DrawBeamBoxToClient(client, fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 5.0, 5.0, 2, 1.0, {0,0,255,255}, 0);
+		}
+		return Plugin_Continue;
+	}
+	
+	
+	new Float:fClientPosition[3], Float:fClientAngles[3];
+	GetClientEyePosition(client, fClientPosition);
+	GetClientEyeAngles(client, fClientAngles);
+	
+	// See what the client is aiming at.
+	TR_TraceRayFilter(fClientPosition, fClientAngles, MASK_SOLID, RayType_Infinite, RayFilter_DontHitSelf, client);
+	if (!TR_DidHit())
+		return Plugin_Continue;
+	
+	new Float:fEnd[3];
+	TR_GetEndPosition(fEnd);
+	
+	// Show an indicator on where the client aims at.
+	TE_SetupGlowSprite(fEnd, g_iGlowSprite, 0.1, 0.1, 150);
+	TE_SendToClient(client);
+	
+	// Preview the zone in realtime while editing.
+	if (g_ClientMenuState[client][CMS_editPosition] || g_ClientMenuState[client][CMS_editState] == ZES_second)
+	{
+		// Don't show anything when preview is disabled.
+		if(g_ClientMenuState[client][CMS_previewMode] == ZPM_disabled)
+			return Plugin_Continue;
+		
+		new Float:fFirstPoint[3], Float:fSecondPoint[3];
+		// Copy the right other coordinate from the zone over.
+		if (g_ClientMenuState[client][CMS_editState] == ZES_first)
+		{
+			// Use aim target position if that's the preview mode.
+			if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
+			{
+				Array_Copy(fEnd, fFirstPoint, 3);
+			}
+			// Or the client's position if that's better.
+			else
+			{
+				GetClientAbsOrigin(client, fFirstPoint);
+			}
+			Array_Copy(g_ClientMenuState[client][CMS_second], fSecondPoint, 3);
+		}
+		else
+		{
+			Array_Copy(g_ClientMenuState[client][CMS_first], fFirstPoint, 3);
+			// Use aim target position if that's the preview mode.
+			if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
+			{
+				Array_Copy(fEnd, fSecondPoint, 3);
+			}
+			// Or the client's position if that's better.
+			else
+			{
+				GetClientAbsOrigin(client, fSecondPoint);
+			}
+		}
+		
+		// TODO: When editing a zone, apply the rotation again.
+		Effect_DrawBeamBoxToClient(client, fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 5.0, 5.0, 2, 1.0, {0,0,255,255}, 0);
+	}
+	
+	return Plugin_Continue;
+}
+
+public bool RayFilter_DontHitSelf(int entity, int contentsMask, any data)
+{
+	return entity != data;
 }
 
 /**
@@ -1464,6 +1551,8 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 		{
 			g_ClientMenuState[param1][CMS_addZone] = true;
 			g_ClientMenuState[param1][CMS_editState] = ZES_first;
+			ClearHandle(g_hShowZoneWhileEditTimer[param1]);
+			g_hShowZoneWhileEditTimer[param1] = CreateTimer(0.1, Timer_ShowZoneWhileAdding, GetClientUserId(param1), TIMER_REPEAT);
 			PrintToChat(param1, "Map Zones > Shoot at the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
 		}
 		// Paste zone from clipboard.
@@ -1567,6 +1656,8 @@ public Menu_HandleZoneList(Handle:menu, MenuAction:action, param1, param2)
 		{
 			g_ClientMenuState[param1][CMS_addZone] = true;
 			g_ClientMenuState[param1][CMS_editState] = ZES_first;
+			ClearHandle(g_hShowZoneWhileEditTimer[param1]);
+			g_hShowZoneWhileEditTimer[param1] = CreateTimer(0.1, Timer_ShowZoneWhileAdding, GetClientUserId(param1), TIMER_REPEAT);
 			PrintToChat(param1, "Map Zones > Shoot at the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
 			return;
 		}
@@ -2189,6 +2280,7 @@ public Menu_HandleZoneEditDetails(Handle:menu, MenuAction:action, param1, param2
 			}
 			
 			TriggerTimer(g_hShowZonesTimer, true);
+			g_hShowZoneWhileEditTimer[param1] = CreateTimer(0.1, Timer_ShowZoneWhileAdding, GetClientUserId(param1), TIMER_REPEAT);
 			
 			DisplayPositionEditMenu(param1);
 		}
@@ -2399,6 +2491,18 @@ DisplayPositionEditMenu(client)
 
 	AddMenuItem(hMenu, "save", "Save changes");
 	
+	new String:sBuffer[256] = "Show preview: ";
+	switch (g_ClientMenuState[client][CMS_previewMode])
+	{
+		case ZPM_disabled:
+			StrCat(sBuffer, sizeof(sBuffer), "Disabled");
+		case ZPM_aim:
+			StrCat(sBuffer, sizeof(sBuffer), "Aim");
+		case ZPM_feet:
+			StrCat(sBuffer, sizeof(sBuffer), "At your feet");
+	}
+	AddMenuItem(hMenu, "togglepreview", sBuffer);
+	
 	AddMenuItem(hMenu, "ax", "Add to X axis");
 	AddMenuItem(hMenu, "sx", "Subtract from X axis");
 	AddMenuItem(hMenu, "ay", "Add to Y axis");
@@ -2439,10 +2543,20 @@ public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
 			return;
 		}
 		
+		if(StrEqual(sInfo, "togglepreview"))
+		{
+			g_ClientMenuState[param1][CMS_previewMode]++;
+			if(g_ClientMenuState[param1][CMS_previewMode] >= ZonePreviewMode)
+				g_ClientMenuState[param1][CMS_previewMode] = ZPM_disabled;
+			
+			DisplayPositionEditMenu(param1);
+			return;
+		}
+		
 		// Add to x
 		new Float:fValue = 5.0;
 		if(sInfo[0] == 's')
-			fValue *= -1;
+			fValue *= -1.0;
 		
 		new iAxis = sInfo[1] - 'x';
 		
@@ -2764,6 +2878,10 @@ bool:LoadZoneGroup(group[ZoneGroup])
 			KvGetString(hKV, "name", sZoneName, sizeof(sZoneName), "unnamed");
 			strcopy(zoneCluster[ZC_name][0], MAX_ZONE_NAME, sZoneName);
 			zoneCluster[ZC_teamFilter] = KvGetNum(hKV, "team");
+			
+			new iColor[4] = {-1, -1, -1, -1};
+			KvGetColor(hKV, "color", iColor[0], iColor[1], iColor[2], iColor[3]);
+			Array_Copy(vBuf, zoneCluster[ZC_color], 4);
 			
 			// See if there is a custom keyvalues section for this cluster.
 			if(KvJumpToKey(hKV, "custom", false) && KvGotoFirstSubKey(hKV, false))
@@ -3489,6 +3607,7 @@ ResetZoneAddingState(client)
 	g_ClientMenuState[client][CMS_editState] = ZES_first;
 	Array_Fill(g_ClientMenuState[client][CMS_first], 3, 0.0);
 	Array_Fill(g_ClientMenuState[client][CMS_second], 3, 0.0);
+	ClearHandle(g_hShowZoneWhileEditTimer[client]);
 }
 
 SaveNewZone(client, const String:sName[])
