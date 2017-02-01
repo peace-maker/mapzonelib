@@ -2550,12 +2550,7 @@ DisplayPositionEditMenu(client)
 		AddMenuItem(hMenu, "resetaimdistance", sBuffer);
 	}
 	
-	AddMenuItem(hMenu, "ax", "Add to X axis");
-	AddMenuItem(hMenu, "sx", "Subtract from X axis");
-	AddMenuItem(hMenu, "ay", "Add to Y axis");
-	AddMenuItem(hMenu, "sy", "Subtract from Y axis");
-	AddMenuItem(hMenu, "az", "Add to Z axis");
-	AddMenuItem(hMenu, "sz", "Subtract from Z axis");
+	AddMenuItem(hMenu, "axismenu", "Move point on axes through menu");
 	
 	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
 }
@@ -2590,30 +2585,102 @@ public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
 			return;
 		}
 		
+		// User wants to edit the points through the menu.
+		if(StrEqual(sInfo, "axismenu"))
+		{
+			// Don't show the zone preview anymore, so the user doesn't get distracted.
+			g_ClientMenuState[param1][CMS_previewMode] = ZPM_disabled;
+			DisplayPositionAxisModificationMenu(param1);
+			return;
+		}
+		
 		// Toggle through all available zone preview modes
 		if(StrEqual(sInfo, "togglepreview"))
 		{
 			g_ClientMenuState[param1][CMS_previewMode]++;
 			if(g_ClientMenuState[param1][CMS_previewMode] >= ZonePreviewMode)
 				g_ClientMenuState[param1][CMS_previewMode] = ZPM_disabled;
-			
-			DisplayPositionEditMenu(param1);
-			return;
 		}
-		
 		// Toggle through all the different step sizes.
-		if(StrEqual(sInfo, "togglestepsize"))
+		else if(StrEqual(sInfo, "togglestepsize"))
 		{
 			g_ClientMenuState[param1][CMS_stepSizeIndex] = (g_ClientMenuState[param1][CMS_stepSizeIndex] + 1) % sizeof(g_fStepsizes);
-			DisplayPositionEditMenu(param1);
-			return;
 		}
-		
 		// Remove the aim culling distance when adding points.
-		if(StrEqual(sInfo, "resetaimdistance"))
+		else if(StrEqual(sInfo, "resetaimdistance"))
 		{
 			g_ClientMenuState[param1][CMS_aimCapDistance] = -1.0;
-			DisplayPositionEditMenu(param1);
+		}
+		
+		DisplayPositionEditMenu(param1);
+	}
+	else if(action == MenuAction_Cancel)
+	{
+		g_ClientMenuState[param1][CMS_editPosition] = false;
+		g_ClientMenuState[param1][CMS_editState] = ZES_first;
+		ResetZoneAddingState(param1);
+		if(param2 == MenuCancel_ExitBack)
+		{
+			DisplayZoneEditDetailsMenu(param1);
+		}
+		else
+		{
+			g_ClientMenuState[param1][CMS_zone] = -1;
+			g_ClientMenuState[param1][CMS_cluster] = -1;
+			g_ClientMenuState[param1][CMS_group] = -1;
+		}
+	}
+}
+
+DisplayPositionAxisModificationMenu(client)
+{
+	new group[ZoneGroup], zoneData[ZoneData];
+	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
+	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
+	
+	new Handle:hMenu = CreateMenu(Menu_HandlePositionAxisEdit);
+	SetMenuTitle(hMenu, "Edit zone \"%s\" position %d\nMove position along the axes.\nStepsize: %.f", zoneData[ZD_name], _:g_ClientMenuState[client][CMS_editState]+1, g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
+	SetMenuExitBackButton(hMenu, true);
+
+	AddMenuItem(hMenu, "save", "Save changes");
+	
+	AddMenuItem(hMenu, "ax", "Add to X axis");
+	AddMenuItem(hMenu, "sx", "Subtract from X axis");
+	AddMenuItem(hMenu, "ay", "Add to Y axis");
+	AddMenuItem(hMenu, "sy", "Subtract from Y axis");
+	AddMenuItem(hMenu, "az", "Add to Z axis");
+	AddMenuItem(hMenu, "sz", "Subtract from Z axis");
+	
+	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+}
+
+public Menu_HandlePositionAxisEdit(Handle:menu, MenuAction:action, param1, param2)
+{
+	if(action == MenuAction_End)
+	{
+		CloseHandle(menu);
+	}
+	else if(action == MenuAction_Select)
+	{
+		new String:sInfo[32];
+		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		
+		new group[ZoneGroup], zoneData[ZoneData];
+		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
+		GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
+		
+		if(StrEqual(sInfo, "save"))
+		{
+			SaveChangedZoneCoordinates(param1, zoneData);
+			Array_Copy(g_ClientMenuState[param1][CMS_rotation], zoneData[ZD_rotation], 3);
+			zoneData[ZD_triggerModel][0] = '\0';
+			SaveZone(group, zoneData);
+			SetupZone(group, zoneData);
+			g_ClientMenuState[param1][CMS_editPosition] = false;
+			g_ClientMenuState[param1][CMS_editState] = ZES_first;
+			ResetZoneAddingState(param1);
+			DisplayZoneEditDetailsMenu(param1);
+			TriggerTimer(g_hShowZonesTimer, true);
 			return;
 		}
 		
@@ -2630,19 +2697,19 @@ public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
 			g_ClientMenuState[param1][CMS_second][iAxis] += fValue;
 		
 		TriggerTimer(g_hShowZonesTimer, true);
-		DisplayPositionEditMenu(param1);
+		DisplayPositionAxisModificationMenu(param1);
 	}
 	else if(action == MenuAction_Cancel)
 	{
-		g_ClientMenuState[param1][CMS_editPosition] = false;
-		g_ClientMenuState[param1][CMS_editState] = ZES_first;
-		ResetZoneAddingState(param1);
 		if(param2 == MenuCancel_ExitBack)
 		{
-			DisplayZoneEditDetailsMenu(param1);
+			DisplayPositionEditMenu(param1);
 		}
 		else
 		{
+			g_ClientMenuState[param1][CMS_editPosition] = false;
+			g_ClientMenuState[param1][CMS_editState] = ZES_first;
+			ResetZoneAddingState(param1);
 			g_ClientMenuState[param1][CMS_zone] = -1;
 			g_ClientMenuState[param1][CMS_cluster] = -1;
 			g_ClientMenuState[param1][CMS_group] = -1;
