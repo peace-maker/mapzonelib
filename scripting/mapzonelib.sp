@@ -161,7 +161,6 @@ public OnPluginStart()
 	HookConVarChange(g_hCVShowZonesDefault, ConVar_OnDebugChanged);
 	
 	HookEvent("round_start", Event_OnRoundStart);
-	HookEvent("bullet_impact", Event_OnBulletImpact);
 	HookEvent("player_spawn", Event_OnPlayerSpawn);
 	HookEvent("player_death", Event_OnPlayerDeath);
 	
@@ -490,14 +489,27 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 {
 	static s_buttons[MAXPLAYERS+1];
 	
-	// Started pressing +use
-	// See if he wants to set a zone's position.
-	if(buttons & IN_USE && !(s_buttons[client] & IN_USE))
+	// Client is currently editing or adding a zone point.
+	if (IsClientEditingZonePosition(client))
 	{
-		new Float:fOrigin[3];
-		GetClientAbsOrigin(client, fOrigin);
+		// Started pressing +use
+		// See if he wants to set a zone's position.
+		if(buttons & IN_USE && !(s_buttons[client] & IN_USE))
+		{
+			new Float:fOrigin[3];
+			GetClientAbsOrigin(client, fOrigin);
+			
+			HandleZonePositionSetting(client, fOrigin);
+		}
 		
-		HandleZonePositionSetting(client, fOrigin);
+		// Started pressing +attack
+		// See if he wants to set a zone's position.
+		if(buttons & IN_ATTACK && !(s_buttons[client] & IN_ATTACK))
+		{
+			new Float:fAimPosition[3];
+			if (GetClientZoneAimPosition(client, fAimPosition))
+				HandleZonePositionSetting(client, fAimPosition);
+		}
 	}
 		
 	// Update the rotation and display it directly
@@ -580,24 +592,6 @@ public ConVar_OnDebugChanged(Handle:convar, const String:oldValue[], const Strin
 public Event_OnRoundStart(Handle:event, const String:name[], bool:dontBroadcast)
 {
 	SetupAllGroupZones();
-}
-
-public Event_OnBulletImpact(Handle:event, const String:name[], bool:dontBroadcast)
-{
-	new client = GetClientOfUserId(GetEventInt(event, "userid"));
-	if(!client)
-		return;
-	
-	new Float:x = GetEventFloat(event, "x");
-	new Float:y = GetEventFloat(event, "y");
-	new Float:z = GetEventFloat(event, "z");
-	
-	new Float:fOrigin[3];
-	fOrigin[0] = x;
-	fOrigin[1] = y;
-	fOrigin[2] = z;
-	
-	HandleZonePositionSetting(client, fOrigin);
 }
 
 public Event_OnPlayerSpawn(Handle:event, const String:name[], bool:dontBroadcast)
@@ -1349,21 +1343,13 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 		return Plugin_Continue;
 	}
 	
-	
-	new Float:fClientPosition[3], Float:fClientAngles[3];
-	GetClientEyePosition(client, fClientPosition);
-	GetClientEyeAngles(client, fClientAngles);
-	
-	// See what the client is aiming at.
-	TR_TraceRayFilter(fClientPosition, fClientAngles, MASK_SOLID, RayType_Infinite, RayFilter_DontHitSelf, client);
-	if (!TR_DidHit())
+	// Get the client's aim position.
+	new Float:fAimPosition[3];
+	if (!GetClientZoneAimPosition(client, fAimPosition))
 		return Plugin_Continue;
 	
-	new Float:fEnd[3];
-	TR_GetEndPosition(fEnd);
-	
 	// Show an indicator on where the client aims at.
-	TE_SetupGlowSprite(fEnd, g_iGlowSprite, 0.1, 0.1, 150);
+	TE_SetupGlowSprite(fAimPosition, g_iGlowSprite, 0.1, 0.1, 150);
 	TE_SendToClient(client);
 	
 	// Preview the zone in realtime while editing.
@@ -1380,7 +1366,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 			// Use aim target position if that's the preview mode.
 			if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
 			{
-				Array_Copy(fEnd, fFirstPoint, 3);
+				Array_Copy(fAimPosition, fFirstPoint, 3);
 			}
 			// Or the client's position if that's better.
 			else
@@ -1396,7 +1382,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 			// Use aim target position if that's the preview mode.
 			if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
 			{
-				Array_Copy(fEnd, fSecondPoint, 3);
+				Array_Copy(fAimPosition, fSecondPoint, 3);
 			}
 			// Or the client's position if that's better.
 			else
@@ -1411,34 +1397,6 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 	}
 	
 	return Plugin_Continue;
-}
-
-public bool:RayFilter_DontHitSelf(entity, contentsMask, any:data)
-{
-	return entity != data;
-}
-
-// Handle the default height of a zone when it's too flat.
-HandleZoneDefaultHeight(&Float:fFirstPointZ, &Float:fSecondPointZ)
-{
-	new Float:fDefaultHeight = GetConVarFloat(g_hCVDefaultHeight);
-	if (fDefaultHeight == 0.0)
-		return;
-	
-	new Float:fMinHeight = GetConVarFloat(g_hCVMinHeight);
-	new Float:fZoneHeight = FloatAbs(fFirstPointZ - fSecondPointZ);
-	if (fZoneHeight > fMinHeight)
-		return;
-	
-	// See which point is higher, so we can raise it even more.
-	if (fFirstPointZ > fSecondPointZ)
-	{
-		fFirstPointZ += fDefaultHeight - fZoneHeight;
-	}
-	else
-	{
-		fSecondPointZ += fDefaultHeight - fZoneHeight;
-	}
 }
 
 /**
@@ -3615,6 +3573,11 @@ RemoveClientFromAllZones(client)
 /**
  * Zone adding
  */
+bool:IsClientEditingZonePosition(client)
+{
+	return g_ClientMenuState[client][CMS_addZone] || g_ClientMenuState[client][CMS_editPosition] || g_ClientMenuState[client][CMS_editCenter];
+}
+
 HandleZonePositionSetting(client, const Float:fOrigin[3])
 {
 	if(g_ClientMenuState[client][CMS_addZone] || g_ClientMenuState[client][CMS_editPosition])
@@ -3663,6 +3626,44 @@ HandleZonePositionSetting(client, const Float:fOrigin[3])
 		Array_Copy(fOrigin, g_ClientMenuState[client][CMS_center], 3);
 		// Show the new zone immediately
 		TriggerTimer(g_hShowZonesTimer, true);
+	}
+}
+
+bool:GetClientZoneAimPosition(client, Float:fTarget[3])
+{
+	new Float:fClientPosition[3], Float:fClientAngles[3];
+	GetClientEyePosition(client, fClientPosition);
+	GetClientEyeAngles(client, fClientAngles);
+	
+	// See what the client is aiming at.
+	TR_TraceRayFilter(fClientPosition, fClientAngles, MASK_SOLID, RayType_Infinite, RayFilter_DontHitSelf, client);
+	if (!TR_DidHit())
+		return false;
+	
+	TR_GetEndPosition(fTarget);
+	return true;
+}
+
+// Handle the default height of a zone when it's too flat.
+HandleZoneDefaultHeight(&Float:fFirstPointZ, &Float:fSecondPointZ)
+{
+	new Float:fDefaultHeight = GetConVarFloat(g_hCVDefaultHeight);
+	if (fDefaultHeight == 0.0)
+		return;
+	
+	new Float:fMinHeight = GetConVarFloat(g_hCVMinHeight);
+	new Float:fZoneHeight = FloatAbs(fFirstPointZ - fSecondPointZ);
+	if (fZoneHeight > fMinHeight)
+		return;
+	
+	// See which point is higher, so we can raise it even more.
+	if (fFirstPointZ > fSecondPointZ)
+	{
+		fFirstPointZ += fDefaultHeight - fZoneHeight;
+	}
+	else
+	{
+		fSecondPointZ += fDefaultHeight - fZoneHeight;
 	}
 }
 
@@ -3888,4 +3889,9 @@ Vector_GetMiddleBetweenPoints(const Float:vec1[3], const Float:vec2[3], Float:re
 	mid[1] = mid[1] / 2.0;
 	mid[2] = mid[2] / 2.0;
 	AddVectors(vec1, mid, result);
+}
+
+public bool:RayFilter_DontHitSelf(entity, contentsMask, any:data)
+{
+	return entity != data;
 }
