@@ -62,6 +62,10 @@ enum ZonePreviewMode {
 	ZPM_feet
 }
 
+// The different step sizes when modifying one point of a zone the user can choose from.
+#define DEFAULT_STEPSIZE_INDEX 3
+new Float:g_fStepsizes[] = {1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0};
+
 enum ClientMenuState {
 	CMS_group,
 	CMS_cluster,
@@ -74,6 +78,7 @@ enum ClientMenuState {
 	bool:CMS_editPosition,
 	ZoneEditState:CMS_editState,
 	ZonePreviewMode:CMS_previewMode,
+	CMS_stepSizeIndex, // index into g_fStepsizes array currently used by the client.
 	Float:CMS_first[3],
 	Float:CMS_second[3],
 	Float:CMS_rotation[3],
@@ -252,6 +257,7 @@ public OnClientDisconnect(client)
 	g_ClientMenuState[client][CMS_editCenter] = false;
 	g_ClientMenuState[client][CMS_editPosition] = false;
 	g_ClientMenuState[client][CMS_previewMode] = ZPM_aim;
+	g_ClientMenuState[client][CMS_stepSizeIndex] = DEFAULT_STEPSIZE_INDEX;
 	Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
 	Array_Fill(g_ClientMenuState[client][CMS_center], 3, 0.0);
 	ResetZoneAddingState(client);
@@ -2533,6 +2539,9 @@ DisplayPositionEditMenu(client)
 	}
 	AddMenuItem(hMenu, "togglepreview", sBuffer);
 	
+	Format(sBuffer, sizeof(sBuffer), "Stepsize: %.0f", g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
+	AddMenuItem(hMenu, "togglestepsize", sBuffer);
+	
 	AddMenuItem(hMenu, "ax", "Add to X axis");
 	AddMenuItem(hMenu, "sx", "Subtract from X axis");
 	AddMenuItem(hMenu, "ay", "Add to Y axis");
@@ -2573,6 +2582,7 @@ public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
 			return;
 		}
 		
+		// Toggle through all available zone preview modes
 		if(StrEqual(sInfo, "togglepreview"))
 		{
 			g_ClientMenuState[param1][CMS_previewMode]++;
@@ -2583,8 +2593,16 @@ public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
 			return;
 		}
 		
+		// Toggle through all the different step sizes.
+		if(StrEqual(sInfo, "togglestepsize"))
+		{
+			g_ClientMenuState[param1][CMS_stepSizeIndex] = (g_ClientMenuState[param1][CMS_stepSizeIndex] + 1) % sizeof(g_fStepsizes);
+			DisplayPositionEditMenu(param1);
+			return;
+		}
+		
 		// Add to x
-		new Float:fValue = 5.0;
+		new Float:fValue = g_fStepsizes[g_ClientMenuState[param1][CMS_stepSizeIndex]];
 		if(sInfo[0] == 's')
 			fValue *= -1.0;
 		
@@ -2702,6 +2720,10 @@ DisplayZoneCenterMenu(client)
 
 	AddMenuItem(hMenu, "save", "Save changes");
 	
+	new String:sBuffer[64];
+	Format(sBuffer, sizeof(sBuffer), "Stepsize: %.0f", g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
+	AddMenuItem(hMenu, "togglestepsize", sBuffer);
+	
 	AddMenuItem(hMenu, "ax", "Add to X axis");
 	AddMenuItem(hMenu, "sx", "Subtract from X axis");
 	AddMenuItem(hMenu, "ay", "Add to Y axis");
@@ -2738,8 +2760,16 @@ public Menu_HandleZoneCenter(Handle:menu, MenuAction:action, param1, param2)
 			return;
 		}
 		
+		// Toggle through all the different step sizes.
+		if(StrEqual(sInfo, "togglestepsize"))
+		{
+			g_ClientMenuState[param1][CMS_stepSizeIndex] = (g_ClientMenuState[param1][CMS_stepSizeIndex] + 1) % sizeof(g_fStepsizes);
+			DisplayZoneCenterMenu(param1);
+			return;
+		}
+		
 		// Add to x
-		new Float:fValue = 5.0;
+		new Float:fValue = g_fStepsizes[g_ClientMenuState[param1][CMS_stepSizeIndex]];
 		if(sInfo[0] == 's')
 			fValue *= -1;
 		
