@@ -79,6 +79,7 @@ enum ClientMenuState {
 	ZoneEditState:CMS_editState,
 	ZonePreviewMode:CMS_previewMode,
 	CMS_stepSizeIndex, // index into g_fStepsizes array currently used by the client.
+	Float:CMS_aimCapDistance, // How far away can the aim target wall be at max?
 	Float:CMS_first[3],
 	Float:CMS_second[3],
 	Float:CMS_rotation[3],
@@ -116,6 +117,9 @@ new g_ClientMenuState[MAXPLAYERS+1][ClientMenuState];
 new g_Clipboard[MAXPLAYERS+1][ClientClipBoard];
 // Show the crosshair and current zone while adding/editing a zone.
 new Handle:g_hShowZoneWhileEditTimer[MAXPLAYERS+1];
+// Temporary store the angles the player looked at when starting 
+// to press +attack2 to keep the view and laser point steady.
+new Float:g_fAimCapTempAngles[MAXPLAYERS+1][3];
 
 public Plugin:myinfo = 
 {
@@ -257,6 +261,7 @@ public OnClientDisconnect(client)
 	g_ClientMenuState[client][CMS_editPosition] = false;
 	g_ClientMenuState[client][CMS_previewMode] = ZPM_aim;
 	g_ClientMenuState[client][CMS_stepSizeIndex] = DEFAULT_STEPSIZE_INDEX;
+	g_ClientMenuState[client][CMS_aimCapDistance] = -1.0;
 	Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
 	Array_Fill(g_ClientMenuState[client][CMS_center], 3, 0.0);
 	ResetZoneAddingState(client);
@@ -488,6 +493,7 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:angles[3], &weapon, &subtype, &cmdnum, &tickcount, &seed, mouse[2])
 {
 	static s_buttons[MAXPLAYERS+1];
+	static s_tickinterval[MAXPLAYERS+1];
 	
 	// Client is currently editing or adding a zone point.
 	if (IsClientEditingZonePosition(client))
@@ -509,6 +515,44 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 			new Float:fAimPosition[3];
 			if (GetClientZoneAimPosition(client, fAimPosition))
 				HandleZonePositionSetting(client, fAimPosition);
+		}
+		
+		// Presses +attack2!
+		// Save current view angles and move the aim target distance cap according to his mouse moving up and down.
+		if(buttons & IN_ATTACK2)
+		{
+			// Started pressing +attack2?
+			// Save the current angles as a reference.
+			if (!(s_buttons[client] & IN_ATTACK2))
+			{
+				g_fAimCapTempAngles[client] = angles;
+				s_tickinterval[client] = 0;
+			}
+			// Wait until the laserpointer drawing set the aimcap distance, if enabling it for the first time.
+			// Only change the culling distance every 10 ticks, so it's not too fast.
+			else if (g_ClientMenuState[client][CMS_aimCapDistance] >= 0.0 && s_tickinterval[client] % 10)
+			{
+				// Change the maximal aim distance according to the mouse up & down movement.
+				g_ClientMenuState[client][CMS_aimCapDistance] += g_fAimCapTempAngles[client][0] - angles[0];
+				
+				// Don't let the distance go behind the player.
+				if(g_ClientMenuState[client][CMS_aimCapDistance] < 0.0)
+				{
+					g_ClientMenuState[client][CMS_aimCapDistance] = 0.0;
+				}
+				// TODO: Maybe seperate the g_fAimCapTempAngles and the point the laser should be displayed?
+				// So moving the mouse after it reached the limit moves the point right away again.
+			}
+			
+			// Keep track how often the RunCmd callback was called since the player started pressing +attack2
+			s_tickinterval[client]++;
+			
+			// Don't move the view while changing the culling limit.
+			angles = g_fAimCapTempAngles[client];
+			
+			// Need to save the buttons too due to early exit.
+			s_buttons[client] = buttons;
+			return Plugin_Changed;
 		}
 	}
 		
@@ -1543,7 +1587,7 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 			g_ClientMenuState[param1][CMS_editState] = ZES_first;
 			ClearHandle(g_hShowZoneWhileEditTimer[param1]);
 			g_hShowZoneWhileEditTimer[param1] = CreateTimer(0.1, Timer_ShowZoneWhileAdding, GetClientUserId(param1), TIMER_REPEAT);
-			PrintToChat(param1, "Map Zones > Shoot at the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
+			PrintToChat(param1, "Map Zones > Click on the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
 		}
 		// Paste zone from clipboard.
 		else if(StrEqual(sInfo, "paste"))
@@ -1648,7 +1692,7 @@ public Menu_HandleZoneList(Handle:menu, MenuAction:action, param1, param2)
 			g_ClientMenuState[param1][CMS_editState] = ZES_first;
 			ClearHandle(g_hShowZoneWhileEditTimer[param1]);
 			g_hShowZoneWhileEditTimer[param1] = CreateTimer(0.1, Timer_ShowZoneWhileAdding, GetClientUserId(param1), TIMER_REPEAT);
-			PrintToChat(param1, "Map Zones > Shoot at the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
+			PrintToChat(param1, "Map Zones > Click on the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
 			return;
 		}
 		
@@ -2476,7 +2520,7 @@ DisplayPositionEditMenu(client)
 	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 	
 	new Handle:hMenu = CreateMenu(Menu_HandlePositionEdit);
-	SetMenuTitle(hMenu, "Edit zone \"%s\" position %d\nShoot at the point or push \"e\" to set it at your feet.", zoneData[ZD_name], _:g_ClientMenuState[client][CMS_editState]+1);
+	SetMenuTitle(hMenu, "Edit zone \"%s\" position %d\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name], _:g_ClientMenuState[client][CMS_editState]+1);
 	SetMenuExitBackButton(hMenu, true);
 
 	AddMenuItem(hMenu, "save", "Save changes");
@@ -2495,6 +2539,16 @@ DisplayPositionEditMenu(client)
 	
 	Format(sBuffer, sizeof(sBuffer), "Stepsize: %.0f", g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
 	AddMenuItem(hMenu, "togglestepsize", sBuffer);
+	
+	if (g_ClientMenuState[client][CMS_aimCapDistance] < 0.0)
+	{
+		AddMenuItem(hMenu, "resetaimdistance", "Max. aim distance: Disabled\nHold rightclick and move mouse up and down to change.", ITEMDRAW_DISABLED);
+	}
+	else
+	{
+		Format(sBuffer, sizeof(sBuffer), "Max. aim distance: %.2f\nHold rightclick and move mouse up and down to change.\nSelect menu option to remove limit.", g_ClientMenuState[client][CMS_aimCapDistance]);
+		AddMenuItem(hMenu, "resetaimdistance", sBuffer);
+	}
 	
 	AddMenuItem(hMenu, "ax", "Add to X axis");
 	AddMenuItem(hMenu, "sx", "Subtract from X axis");
@@ -2551,6 +2605,14 @@ public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
 		if(StrEqual(sInfo, "togglestepsize"))
 		{
 			g_ClientMenuState[param1][CMS_stepSizeIndex] = (g_ClientMenuState[param1][CMS_stepSizeIndex] + 1) % sizeof(g_fStepsizes);
+			DisplayPositionEditMenu(param1);
+			return;
+		}
+		
+		// Remove the aim culling distance when adding points.
+		if(StrEqual(sInfo, "resetaimdistance"))
+		{
+			g_ClientMenuState[param1][CMS_aimCapDistance] = -1.0;
 			DisplayPositionEditMenu(param1);
 			return;
 		}
@@ -2669,7 +2731,7 @@ DisplayZoneCenterMenu(client)
 	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 	
 	new Handle:hMenu = CreateMenu(Menu_HandleZoneCenter);
-	SetMenuTitle(hMenu, "Edit zone \"%s\" center\nShoot at the point or push \"e\" to set it at your feet.", zoneData[ZD_name]);
+	SetMenuTitle(hMenu, "Edit zone \"%s\" center\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name]);
 	SetMenuExitBackButton(hMenu, true);
 
 	AddMenuItem(hMenu, "save", "Save changes");
@@ -2677,6 +2739,16 @@ DisplayZoneCenterMenu(client)
 	new String:sBuffer[64];
 	Format(sBuffer, sizeof(sBuffer), "Stepsize: %.0f", g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
 	AddMenuItem(hMenu, "togglestepsize", sBuffer);
+	
+	if (g_ClientMenuState[client][CMS_aimCapDistance] < 0.0)
+	{
+		AddMenuItem(hMenu, "resetaimdistance", "Max. aim distance: Disabled\nHold rightclick and move mouse up and down to change.", ITEMDRAW_DISABLED);
+	}
+	else
+	{
+		Format(sBuffer, sizeof(sBuffer), "Max. aim distance: %.2f\nHold rightclick and move mouse up and down to change.\nSelect menu option to remove limit.", g_ClientMenuState[client][CMS_aimCapDistance]);
+		AddMenuItem(hMenu, "resetaimdistance", sBuffer);
+	}
 	
 	AddMenuItem(hMenu, "ax", "Add to X axis");
 	AddMenuItem(hMenu, "sx", "Subtract from X axis");
@@ -2718,6 +2790,14 @@ public Menu_HandleZoneCenter(Handle:menu, MenuAction:action, param1, param2)
 		if(StrEqual(sInfo, "togglestepsize"))
 		{
 			g_ClientMenuState[param1][CMS_stepSizeIndex] = (g_ClientMenuState[param1][CMS_stepSizeIndex] + 1) % sizeof(g_fStepsizes);
+			DisplayZoneCenterMenu(param1);
+			return;
+		}
+		
+		// Remove the aim culling distance when adding points.
+		if(StrEqual(sInfo, "resetaimdistance"))
+		{
+			g_ClientMenuState[param1][CMS_aimCapDistance] = -1.0;
 			DisplayZoneCenterMenu(param1);
 			return;
 		}
@@ -3588,7 +3668,7 @@ HandleZonePositionSetting(client, const Float:fOrigin[3])
 			if(g_ClientMenuState[client][CMS_addZone])
 			{
 				g_ClientMenuState[client][CMS_editState] = ZES_second;
-				PrintToChat(client, "Map Zones > Now shoot at the opposing diagonal edge of the zone or push \"e\" to set it at your feet.");
+				PrintToChat(client, "Map Zones > Now click on the opposing diagonal edge of the zone or push \"e\" to set it at your feet.");
 			}
 			else
 			{
@@ -3633,14 +3713,59 @@ bool:GetClientZoneAimPosition(client, Float:fTarget[3])
 {
 	new Float:fClientPosition[3], Float:fClientAngles[3];
 	GetClientEyePosition(client, fClientPosition);
-	GetClientEyeAngles(client, fClientAngles);
+	
+	// When a player is currently holding rightclick while editing a zone point position,
+	// he's trying to adjust the maximal distance of the laserpointer point which specifies the target position.
+	// Don't change the pointer position while moving the mouse up and down to change the distance.
+	new bool:bIsAdjustingAimLimit = (GetClientButtons(client) & IN_ATTACK2 == IN_ATTACK2) && IsClientEditingZonePosition(client);
+	if (bIsAdjustingAimLimit)
+	{
+		fClientAngles = g_fAimCapTempAngles[client];
+	}
+	else
+	{
+		GetClientEyeAngles(client, fClientAngles);
+	}
 	
 	// See what the client is aiming at.
+	new bool:bDidHit;
 	TR_TraceRayFilter(fClientPosition, fClientAngles, MASK_SOLID, RayType_Infinite, RayFilter_DontHitSelf, client);
-	if (!TR_DidHit())
-		return false;
+	bDidHit = TR_DidHit();
 	
-	TR_GetEndPosition(fTarget);
+	// See if we need to cap it.
+	new Float:fAimDirection[3];
+	// We did hit something over there.
+	if (bDidHit)
+	{
+		TR_GetEndPosition(fTarget);
+		MakeVectorFromPoints(fClientPosition, fTarget, fAimDirection);
+		
+		// Player is aiming at something that's nearer than the current maximal distance?
+		new Float:fDistance = GetVectorLength(fAimDirection);
+		if (fDistance <= g_ClientMenuState[client][CMS_aimCapDistance]
+		// Or is currently adjusting the max distance and never set it before? Start moving the point at the current position.
+		|| (bIsAdjustingAimLimit && g_ClientMenuState[client][CMS_aimCapDistance] < 0.0))
+		{
+			// Keep the aim cap distance at the distance of the nearest object, if currently adjusting it.
+			if (bIsAdjustingAimLimit)
+			{
+				g_ClientMenuState[client][CMS_aimCapDistance] = fDistance;
+			}
+			return true;
+		}
+	}
+	
+	// See if we want to cap it at some distance.
+	if (g_ClientMenuState[client][CMS_aimCapDistance] < 0.0)
+		return bDidHit;
+	
+	// The traced point is further away than our limit.
+	// Move the aimCapDistance into the direction where the player is looking.
+	GetAngleVectors(fClientAngles, fAimDirection, NULL_VECTOR, NULL_VECTOR);
+	NormalizeVector(fAimDirection, fAimDirection);
+	ScaleVector(fAimDirection, g_ClientMenuState[client][CMS_aimCapDistance]);
+	AddVectors(fClientPosition, fAimDirection, fTarget);
+	
 	return true;
 }
 
