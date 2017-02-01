@@ -1188,24 +1188,20 @@ public Action:Timer_ShowZones(Handle:timer)
 			Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
 			Array_Copy(zoneData[ZD_rotation], fAngles, 3);
 			
+			// Fetch cluster if zone is in one for the color.
+			zoneCluster[ZC_color][0] = -1;
+			if (zoneData[ZD_clusterIndex] != -1)
+				GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
+			
+			// Use the custom color of the cluster if set.
+			if (zoneCluster[ZC_color][0] >= 0)
+			{
+				Array_Copy(zoneCluster[ZC_color], iColor, 4);
+			}
 			// Use the custom color of the zone if set.
-			if (zoneData[ZD_color][0] >= 0)
+			else if (zoneData[ZD_color][0] >= 0)
 			{
 				Array_Copy(zoneData[ZD_color], iColor, 4);
-			}
-			// Use the custom color of the cluster if set.
-			else if (zoneData[ZD_clusterIndex] != -1)
-			{
-				GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
-				if (zoneCluster[ZC_color][0] >= 0)
-				{
-					Array_Copy(zoneCluster[ZC_color], iColor, 4);
-				}
-				// Use default if cluster doesn't have an own color.
-				else
-				{
-					Array_Copy(iDefaultColor, iColor, 4);
-				}
 			}
 			// Use the default color of the group, if not overwritten.
 			else
