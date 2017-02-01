@@ -90,6 +90,8 @@ enum ClientClipBoard {
 
 new Handle:g_hCVShowZonesDefault;
 new Handle:g_hCVDebugBeamDistance;
+new Handle:g_hCVMinHeight;
+new Handle:g_hCVDefaultHeight;
 
 new Handle:g_hfwdOnEnterForward;
 new Handle:g_hfwdOnLeaveForward;
@@ -148,6 +150,9 @@ public OnPluginStart()
 	
 	g_hCVShowZonesDefault = CreateConVar("sm_mapzone_showzones", "0", "Show all zones to all players by default?", _, true, 0.0, true, 1.0);
 	g_hCVDebugBeamDistance = CreateConVar("sm_mapzone_debug_beamdistance", "5000", "Only show zones that are as close as up to x units to the player.", _, true, 0.0);
+	g_hCVMinHeight = CreateConVar("sm_mapzone_minheight", "10", "Snap to the default_height if zone is below this height.", _, true, 0.0);
+	g_hCVDefaultHeight = CreateConVar("sm_mapzone_default_height", "128", "The default height of a zone when it's below the minimum height. 0 to disable.", _, true, 0.0);
+	
 	HookConVarChange(g_hCVShowZonesDefault, ConVar_OnDebugChanged);
 	
 	HookEvent("round_start", Event_OnRoundStart);
@@ -1381,6 +1386,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 				GetClientAbsOrigin(client, fFirstPoint);
 			}
 			Array_Copy(g_ClientMenuState[client][CMS_second], fSecondPoint, 3);
+			HandleZoneDefaultHeight(fFirstPoint[2], fSecondPoint[2]);
 		}
 		else
 		{
@@ -1395,6 +1401,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 			{
 				GetClientAbsOrigin(client, fSecondPoint);
 			}
+			HandleZoneDefaultHeight(fFirstPoint[2], fSecondPoint[2]);
 		}
 		
 		// TODO: When editing a zone, apply the rotation again.
@@ -1404,9 +1411,32 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 	return Plugin_Continue;
 }
 
-public bool RayFilter_DontHitSelf(int entity, int contentsMask, any data)
+public bool:RayFilter_DontHitSelf(entity, contentsMask, any:data)
 {
 	return entity != data;
+}
+
+// Handle the default height of a zone when it's too flat.
+HandleZoneDefaultHeight(&Float:fFirstPointZ, &Float:fSecondPointZ)
+{
+	new Float:fDefaultHeight = GetConVarFloat(g_hCVDefaultHeight);
+	if (fDefaultHeight == 0.0)
+		return;
+	
+	new Float:fMinHeight = GetConVarFloat(g_hCVMinHeight);
+	new Float:fZoneHeight = FloatAbs(fFirstPointZ - fSecondPointZ);
+	if (fZoneHeight > fMinHeight)
+		return;
+	
+	// See which point is higher, so we can raise it even more.
+	if (fFirstPointZ > fSecondPointZ)
+	{
+		fFirstPointZ += fDefaultHeight - fZoneHeight;
+	}
+	else
+	{
+		fSecondPointZ += fDefaultHeight - fZoneHeight;
+	}
 }
 
 /**
@@ -3576,6 +3606,7 @@ HandleZonePositionSetting(client, const Float:fOrigin[3])
 				// Setting one point is tricky when using rotations.
 				// We have to reset the rotation here.
 				Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
+				HandleZoneDefaultHeight(g_ClientMenuState[client][CMS_first][2], g_ClientMenuState[client][CMS_second][2]);
 			
 				// Show the new zone immediately
 				TriggerTimer(g_hShowZonesTimer, true);
@@ -3584,6 +3615,7 @@ HandleZonePositionSetting(client, const Float:fOrigin[3])
 		else if(g_ClientMenuState[client][CMS_editState] == ZES_second)
 		{
 			Array_Copy(fOrigin, g_ClientMenuState[client][CMS_second], 3);
+			HandleZoneDefaultHeight(g_ClientMenuState[client][CMS_first][2], g_ClientMenuState[client][CMS_second][2]);
 			
 			// Setting one point is tricky when using rotations.
 			// We have to reset the rotation here.
