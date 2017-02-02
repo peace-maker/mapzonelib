@@ -1397,11 +1397,40 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 	TE_SendToClient(client);
 	
 	// Preview the zone in realtime while editing.
-	if (g_ClientMenuState[client][CMS_editPosition] || g_ClientMenuState[client][CMS_editState] == ZES_second)
+	if (g_ClientMenuState[client][CMS_editCenter]
+	|| g_ClientMenuState[client][CMS_editPosition]
+	|| g_ClientMenuState[client][CMS_editState] == ZES_second)
 	{
 		// Don't show anything when preview is disabled.
 		if(g_ClientMenuState[client][CMS_previewMode] == ZPM_disabled)
 			return Plugin_Continue;
+		
+		// When editing the center, we can display the rotation too :)
+		if (g_ClientMenuState[client][CMS_editCenter])
+		{
+			new group[ZoneGroup], zoneData[ZoneData];
+			GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
+			GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
+			
+			// Only change the center of the box, keep all the other paramters the same.
+			new Float:fCenter[3], Float:fRotation[3], Float:fMins[3], Float:fMaxs[3];
+			// Use aim target position if that's the preview mode.
+			if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
+			{
+				Array_Copy(fAimPosition, fCenter, 3);
+			}
+			// Or the client's position if that's better.
+			else
+			{
+				GetClientAbsOrigin(client, fCenter);
+			}
+			Array_Copy(zoneData[ZD_rotation], fRotation, 3);
+			Array_Copy(zoneData[ZD_mins], fMins, 3);
+			Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
+			
+			Effect_DrawBeamBoxRotatableToClient(client, fCenter, fMins, fMaxs, fRotation, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 5.0, 5.0, 2, 1.0, {0,0,255,255}, 0);
+			return Plugin_Continue;
+		}
 		
 		new Float:fFirstPoint[3], Float:fSecondPoint[3];
 		// Copy the right other coordinate from the zone over.
@@ -2314,8 +2343,6 @@ public Menu_HandleZoneEditDetails(Handle:menu, MenuAction:action, param1, param2
 			}
 			
 			TriggerTimer(g_hShowZonesTimer, true);
-			g_hShowZoneWhileEditTimer[param1] = CreateTimer(0.1, Timer_ShowZoneWhileAdding, GetClientUserId(param1), TIMER_REPEAT);
-			
 			DisplayZonePointEditMenu(param1);
 		}
 		// Change rotation of the zone
@@ -2516,6 +2543,10 @@ public Panel_HandleConfirmDeleteZone(Handle:menu, MenuAction:action, param1, par
 // Edit one of the points or the center of the zone.
 DisplayZonePointEditMenu(client)
 {
+	// Start the display timer, if this is the first time we open this menu.
+	if (!g_hShowZoneWhileEditTimer[client])
+		g_hShowZoneWhileEditTimer[client] = CreateTimer(0.1, Timer_ShowZoneWhileAdding, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE|TIMER_REPEAT);
+
 	new group[ZoneGroup], zoneData[ZoneData];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
