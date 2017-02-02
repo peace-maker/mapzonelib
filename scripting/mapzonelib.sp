@@ -121,6 +121,8 @@ new Handle:g_hShowZoneWhileEditTimer[MAXPLAYERS+1];
 // Temporary store the angles the player looked at when starting 
 // to press +attack2 to keep the view and laser point steady.
 new Float:g_fAimCapTempAngles[MAXPLAYERS+1][3];
+// Store the buttons the player pressed in the previous frame, so we know when he started to press something.
+new g_iClientButtons[MAXPLAYERS+1];
 
 public Plugin:myinfo = 
 {
@@ -267,6 +269,7 @@ public OnClientDisconnect(client)
 	Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
 	Array_Fill(g_ClientMenuState[client][CMS_center], 3, 0.0);
 	ResetZoneAddingState(client);
+	g_iClientButtons[client] = 0;
 	
 	ClearClientClipboard(client);
 	
@@ -494,7 +497,6 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 
 public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:angles[3], &weapon, &subtype, &cmdnum, &tickcount, &seed, mouse[2])
 {
-	static s_buttons[MAXPLAYERS+1];
 	static s_tickinterval[MAXPLAYERS+1];
 	
 	// Client is currently editing or adding a zone point.
@@ -502,7 +504,7 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 	{
 		// Started pressing +use
 		// See if he wants to set a zone's position.
-		if(buttons & IN_USE && !(s_buttons[client] & IN_USE))
+		if(buttons & IN_USE && !(g_iClientButtons[client] & IN_USE))
 		{
 			new Float:fOrigin[3];
 			GetClientAbsOrigin(client, fOrigin);
@@ -512,7 +514,7 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 		
 		// Started pressing +attack
 		// See if he wants to set a zone's position.
-		if(buttons & IN_ATTACK && !(s_buttons[client] & IN_ATTACK))
+		if(buttons & IN_ATTACK && !(g_iClientButtons[client] & IN_ATTACK))
 		{
 			new Float:fAimPosition[3];
 			if (GetClientZoneAimPosition(client, fAimPosition))
@@ -525,7 +527,7 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 		{
 			// Started pressing +attack2?
 			// Save the current angles as a reference.
-			if (!(s_buttons[client] & IN_ATTACK2))
+			if (!(g_iClientButtons[client] & IN_ATTACK2))
 			{
 				g_fAimCapTempAngles[client] = angles;
 				s_tickinterval[client] = 0;
@@ -556,7 +558,10 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 			angles = g_fAimCapTempAngles[client];
 			
 			// Need to save the buttons too due to early exit.
-			s_buttons[client] = buttons;
+			g_iClientButtons[client] = buttons;
+			// Remove the button after saving it, so we still know when the player stops pressing the button,
+			// but don't actually run the command.
+			buttons &= ~IN_ATTACK2;
 			return Plugin_Changed;
 		}
 	}
@@ -610,11 +615,11 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 		// Show the laser box at the new position for a longer time.
 		// The above laser box is only displayed a splitsecond to produce a smoother animation.
 		// Have the current rotation persist, when stopping rotating.
-		else if(s_buttons[client] & IN_USE)
+		else if(g_iClientButtons[client] & IN_USE)
 			TriggerTimer(g_hShowZonesTimer, true);
 	}
 	
-	s_buttons[client] = buttons;
+	g_iClientButtons[client] = buttons;
 	return Plugin_Continue;
 }
 
@@ -3752,7 +3757,7 @@ bool:GetClientZoneAimPosition(client, Float:fTarget[3])
 	// When a player is currently holding rightclick while editing a zone point position,
 	// he's trying to adjust the maximal distance of the laserpointer point which specifies the target position.
 	// Don't change the pointer position while moving the mouse up and down to change the distance.
-	new bool:bIsAdjustingAimLimit = g_ClientMenuState[client][CMS_previewMode] == ZPM_aim && (GetClientButtons(client) & IN_ATTACK2 == IN_ATTACK2) && IsClientEditingZonePosition(client);
+	new bool:bIsAdjustingAimLimit = g_ClientMenuState[client][CMS_previewMode] == ZPM_aim && (g_iClientButtons[client] & IN_ATTACK2 == IN_ATTACK2) && IsClientEditingZonePosition(client);
 	if (bIsAdjustingAimLimit)
 	{
 		fClientAngles = g_fAimCapTempAngles[client];
