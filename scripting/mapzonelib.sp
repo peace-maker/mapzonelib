@@ -2316,7 +2316,7 @@ public Menu_HandleZoneEditDetails(Handle:menu, MenuAction:action, param1, param2
 			TriggerTimer(g_hShowZonesTimer, true);
 			g_hShowZoneWhileEditTimer[param1] = CreateTimer(0.1, Timer_ShowZoneWhileAdding, GetClientUserId(param1), TIMER_REPEAT);
 			
-			DisplayPositionEditMenu(param1);
+			DisplayZonePointEditMenu(param1);
 		}
 		// Change rotation of the zone
 		else if(StrEqual(sInfo, "rotation"))
@@ -2336,7 +2336,7 @@ public Menu_HandleZoneEditDetails(Handle:menu, MenuAction:action, param1, param2
 			g_ClientMenuState[param1][CMS_editCenter] = true;
 			// Show box now
 			TriggerTimer(g_hShowZonesTimer, true);
-			DisplayZoneCenterMenu(param1);
+			DisplayZonePointEditMenu(param1);
 		}
 	}
 	else if(action == MenuAction_Cancel)
@@ -2513,14 +2513,22 @@ public Panel_HandleConfirmDeleteZone(Handle:menu, MenuAction:action, param1, par
 	}
 }
 
-DisplayPositionEditMenu(client)
+// Edit one of the points or the center of the zone.
+DisplayZonePointEditMenu(client)
 {
 	new group[ZoneGroup], zoneData[ZoneData];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 	
-	new Handle:hMenu = CreateMenu(Menu_HandlePositionEdit);
-	SetMenuTitle(hMenu, "Edit zone \"%s\" position %d\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name], _:g_ClientMenuState[client][CMS_editState]+1);
+	new Handle:hMenu = CreateMenu(Menu_HandleZonePointEdit);
+	if(g_ClientMenuState[client][CMS_editCenter])
+	{
+		SetMenuTitle(hMenu, "Edit zone \"%s\" center\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name]);
+	}
+	else
+	{
+		SetMenuTitle(hMenu, "Edit zone \"%s\" position %d\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name], _:g_ClientMenuState[client][CMS_editState]+1);
+	}
 	SetMenuExitBackButton(hMenu, true);
 
 	AddMenuItem(hMenu, "save", "Save changes");
@@ -2555,7 +2563,7 @@ DisplayPositionEditMenu(client)
 	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
 }
 
-public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
+public Menu_HandleZonePointEdit(Handle:menu, MenuAction:action, param1, param2)
 {
 	if(action == MenuAction_End)
 	{
@@ -2572,13 +2580,29 @@ public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
 		
 		if(StrEqual(sInfo, "save"))
 		{
-			SaveChangedZoneCoordinates(param1, zoneData);
-			Array_Copy(g_ClientMenuState[param1][CMS_rotation], zoneData[ZD_rotation], 3);
-			zoneData[ZD_triggerModel][0] = '\0';
+			// Save the new center of the zone.
+			// The rotation and mins/maxs stay the same, so not much to do.
+			if(g_ClientMenuState[param1][CMS_editCenter])
+			{
+				Array_Copy(g_ClientMenuState[param1][CMS_center], zoneData[ZD_position], 3);
+				g_ClientMenuState[param1][CMS_editCenter] = false;
+			}
+			else
+			{
+				// Save the new position of one of the points.
+				// Need to recalculate the center and mins/maxs now.
+				SaveChangedZoneCoordinates(param1, zoneData);
+				Array_Copy(g_ClientMenuState[param1][CMS_rotation], zoneData[ZD_rotation], 3);
+				// Find a better fitting trigger model for the new zone
+				// next time this zone is created.
+				zoneData[ZD_triggerModel][0] = '\0';
+				g_ClientMenuState[param1][CMS_editPosition] = false;
+				g_ClientMenuState[param1][CMS_editState] = ZES_first;
+			}
+			
 			SaveZone(group, zoneData);
 			SetupZone(group, zoneData);
-			g_ClientMenuState[param1][CMS_editPosition] = false;
-			g_ClientMenuState[param1][CMS_editState] = ZES_first;
+			
 			ResetZoneAddingState(param1);
 			DisplayZoneEditDetailsMenu(param1);
 			TriggerTimer(g_hShowZonesTimer, true);
@@ -2590,7 +2614,7 @@ public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
 		{
 			// Don't show the zone preview anymore, so the user doesn't get distracted.
 			g_ClientMenuState[param1][CMS_previewMode] = ZPM_disabled;
-			DisplayPositionAxisModificationMenu(param1);
+			DisplayPointAxisModificationMenu(param1);
 			return;
 		}
 		
@@ -2612,10 +2636,11 @@ public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
 			g_ClientMenuState[param1][CMS_aimCapDistance] = -1.0;
 		}
 		
-		DisplayPositionEditMenu(param1);
+		DisplayZonePointEditMenu(param1);
 	}
 	else if(action == MenuAction_Cancel)
 	{
+		g_ClientMenuState[param1][CMS_editCenter] = false;
 		g_ClientMenuState[param1][CMS_editPosition] = false;
 		g_ClientMenuState[param1][CMS_editState] = ZES_first;
 		ResetZoneAddingState(param1);
@@ -2632,29 +2657,38 @@ public Menu_HandlePositionEdit(Handle:menu, MenuAction:action, param1, param2)
 	}
 }
 
-DisplayPositionAxisModificationMenu(client)
+DisplayPointAxisModificationMenu(client)
 {
 	new group[ZoneGroup], zoneData[ZoneData];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 	
-	new Handle:hMenu = CreateMenu(Menu_HandlePositionAxisEdit);
-	SetMenuTitle(hMenu, "Edit zone \"%s\" position %d\nMove position along the axes.\nStepsize: %.f", zoneData[ZD_name], _:g_ClientMenuState[client][CMS_editState]+1, g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
+	new Handle:hMenu = CreateMenu(Menu_HandlePointAxisEdit);
 	SetMenuExitBackButton(hMenu, true);
-
-	AddMenuItem(hMenu, "save", "Save changes");
 	
-	AddMenuItem(hMenu, "ax", "Add to X axis");
+	new String:sBuffer[256];
+	if(g_ClientMenuState[client][CMS_editCenter])
+	{
+		Format(sBuffer, sizeof(sBuffer), "Edit center of zone \"%s\"", zoneData[ZD_name]);
+	}
+	else
+	{
+		Format(sBuffer, sizeof(sBuffer), "Edit zone \"%s\" position %d", zoneData[ZD_name], _:g_ClientMenuState[client][CMS_editState]+1);
+	}
+	Format(sBuffer, sizeof(sBuffer), "%s\nMove position along the axes.\nStepsize: %.f\n\nGo back to save changes!", sBuffer, g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
+	SetMenuTitle(hMenu, sBuffer);
+
+	AddMenuItem(hMenu, "ax", "Add to X axis (red)");
 	AddMenuItem(hMenu, "sx", "Subtract from X axis");
-	AddMenuItem(hMenu, "ay", "Add to Y axis");
+	AddMenuItem(hMenu, "ay", "Add to Y axis (green)");
 	AddMenuItem(hMenu, "sy", "Subtract from Y axis");
-	AddMenuItem(hMenu, "az", "Add to Z axis");
+	AddMenuItem(hMenu, "az", "Add to Z axis (blue)");
 	AddMenuItem(hMenu, "sz", "Subtract from Z axis");
 	
 	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
 }
 
-public Menu_HandlePositionAxisEdit(Handle:menu, MenuAction:action, param1, param2)
+public Menu_HandlePointAxisEdit(Handle:menu, MenuAction:action, param1, param2)
 {
 	if(action == MenuAction_End)
 	{
@@ -2669,21 +2703,6 @@ public Menu_HandlePositionAxisEdit(Handle:menu, MenuAction:action, param1, param
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 		GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
 		
-		if(StrEqual(sInfo, "save"))
-		{
-			SaveChangedZoneCoordinates(param1, zoneData);
-			Array_Copy(g_ClientMenuState[param1][CMS_rotation], zoneData[ZD_rotation], 3);
-			zoneData[ZD_triggerModel][0] = '\0';
-			SaveZone(group, zoneData);
-			SetupZone(group, zoneData);
-			g_ClientMenuState[param1][CMS_editPosition] = false;
-			g_ClientMenuState[param1][CMS_editState] = ZES_first;
-			ResetZoneAddingState(param1);
-			DisplayZoneEditDetailsMenu(param1);
-			TriggerTimer(g_hShowZonesTimer, true);
-			return;
-		}
-		
 		// Add to x
 		new Float:fValue = g_fStepsizes[g_ClientMenuState[param1][CMS_stepSizeIndex]];
 		if(sInfo[0] == 's')
@@ -2691,22 +2710,26 @@ public Menu_HandlePositionAxisEdit(Handle:menu, MenuAction:action, param1, param
 		
 		new iAxis = sInfo[1] - 'x';
 		
-		if(g_ClientMenuState[param1][CMS_editState] == ZES_first)
+		// Apply value to selected point of the zone.
+		if(g_ClientMenuState[param1][CMS_editCenter])
+			g_ClientMenuState[param1][CMS_center][iAxis] += fValue;
+		else if(g_ClientMenuState[param1][CMS_editState] == ZES_first)
 			g_ClientMenuState[param1][CMS_first][iAxis] += fValue;
 		else
 			g_ClientMenuState[param1][CMS_second][iAxis] += fValue;
 		
 		TriggerTimer(g_hShowZonesTimer, true);
-		DisplayPositionAxisModificationMenu(param1);
+		DisplayPointAxisModificationMenu(param1);
 	}
 	else if(action == MenuAction_Cancel)
 	{
 		if(param2 == MenuCancel_ExitBack)
 		{
-			DisplayPositionEditMenu(param1);
+			DisplayZonePointEditMenu(param1);
 		}
 		else
 		{
+			g_ClientMenuState[param1][CMS_editCenter] = false;
 			g_ClientMenuState[param1][CMS_editPosition] = false;
 			g_ClientMenuState[param1][CMS_editState] = ZES_first;
 			ResetZoneAddingState(param1);
@@ -2778,112 +2801,6 @@ public Menu_HandleZoneRotation(Handle:menu, MenuAction:action, param1, param2)
 	{
 		g_ClientMenuState[param1][CMS_editRotation] = false;
 		Array_Fill(g_ClientMenuState[param1][CMS_rotation], 3, 0.0);
-		if(param2 == MenuCancel_ExitBack)
-		{
-			DisplayZoneEditDetailsMenu(param1);
-		}
-		else
-		{
-			g_ClientMenuState[param1][CMS_zone] = -1;
-			g_ClientMenuState[param1][CMS_cluster] = -1;
-			g_ClientMenuState[param1][CMS_group] = -1;
-		}
-	}
-}
-
-DisplayZoneCenterMenu(client)
-{
-	new group[ZoneGroup], zoneData[ZoneData];
-	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
-	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
-	
-	new Handle:hMenu = CreateMenu(Menu_HandleZoneCenter);
-	SetMenuTitle(hMenu, "Edit zone \"%s\" center\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name]);
-	SetMenuExitBackButton(hMenu, true);
-
-	AddMenuItem(hMenu, "save", "Save changes");
-	
-	new String:sBuffer[64];
-	Format(sBuffer, sizeof(sBuffer), "Stepsize: %.0f", g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
-	AddMenuItem(hMenu, "togglestepsize", sBuffer);
-	
-	if (g_ClientMenuState[client][CMS_aimCapDistance] < 0.0)
-	{
-		AddMenuItem(hMenu, "resetaimdistance", "Max. aim distance: Disabled\nHold rightclick and move mouse up and down to change.", ITEMDRAW_DISABLED);
-	}
-	else
-	{
-		Format(sBuffer, sizeof(sBuffer), "Max. aim distance: %.2f\nHold rightclick and move mouse up and down to change.\nSelect menu option to remove limit.", g_ClientMenuState[client][CMS_aimCapDistance]);
-		AddMenuItem(hMenu, "resetaimdistance", sBuffer);
-	}
-	
-	AddMenuItem(hMenu, "ax", "Add to X axis");
-	AddMenuItem(hMenu, "sx", "Subtract from X axis");
-	AddMenuItem(hMenu, "ay", "Add to Y axis");
-	AddMenuItem(hMenu, "sy", "Subtract from Y axis");
-	AddMenuItem(hMenu, "az", "Add to Z axis");
-	AddMenuItem(hMenu, "sz", "Subtract from Z axis");
-	
-	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
-}
-
-public Menu_HandleZoneCenter(Handle:menu, MenuAction:action, param1, param2)
-{
-	if(action == MenuAction_End)
-	{
-		CloseHandle(menu);
-	}
-	else if(action == MenuAction_Select)
-	{
-		new String:sInfo[32];
-		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
-		
-		new group[ZoneGroup], zoneData[ZoneData];
-		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
-		GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
-		
-		if(StrEqual(sInfo, "save"))
-		{
-			Array_Copy(g_ClientMenuState[param1][CMS_center], zoneData[ZD_position], 3);
-			SaveZone(group, zoneData);
-			SetupZone(group, zoneData);
-			g_ClientMenuState[param1][CMS_editCenter] = false;
-			DisplayZoneEditDetailsMenu(param1);
-			TriggerTimer(g_hShowZonesTimer, true);
-			return;
-		}
-		
-		// Toggle through all the different step sizes.
-		if(StrEqual(sInfo, "togglestepsize"))
-		{
-			g_ClientMenuState[param1][CMS_stepSizeIndex] = (g_ClientMenuState[param1][CMS_stepSizeIndex] + 1) % sizeof(g_fStepsizes);
-			DisplayZoneCenterMenu(param1);
-			return;
-		}
-		
-		// Remove the aim culling distance when adding points.
-		if(StrEqual(sInfo, "resetaimdistance"))
-		{
-			g_ClientMenuState[param1][CMS_aimCapDistance] = -1.0;
-			DisplayZoneCenterMenu(param1);
-			return;
-		}
-		
-		// Add to x
-		new Float:fValue = g_fStepsizes[g_ClientMenuState[param1][CMS_stepSizeIndex]];
-		if(sInfo[0] == 's')
-			fValue *= -1;
-		
-		new iAxis = sInfo[1] - 'x';
-		
-		g_ClientMenuState[param1][CMS_center][iAxis] += fValue;
-		
-		TriggerTimer(g_hShowZonesTimer, true);
-		DisplayZoneCenterMenu(param1);
-	}
-	else if(action == MenuAction_Cancel)
-	{
-		g_ClientMenuState[param1][CMS_editCenter] = false;
 		if(param2 == MenuCancel_ExitBack)
 		{
 			DisplayZoneEditDetailsMenu(param1);
@@ -3920,7 +3837,7 @@ SaveNewZone(client, const String:sName[])
 	
 	// If we just pasted this zone, we want to edit the center position right away!
 	if(g_ClientMenuState[client][CMS_editCenter])
-		DisplayZoneCenterMenu(client);
+		DisplayZonePointEditMenu(client);
 	else
 		DisplayZoneEditMenu(client);
 }
