@@ -80,6 +80,7 @@ enum ClientMenuState {
 	ZonePreviewMode:CMS_previewMode,
 	CMS_stepSizeIndex, // index into g_fStepsizes array currently used by the client.
 	Float:CMS_aimCapDistance, // How far away can the aim target wall be at max?
+	bool:CMS_changingAimCapDistance, // Player is currently changing the cap distance using right click?
 	Float:CMS_first[3],
 	Float:CMS_second[3],
 	Float:CMS_rotation[3],
@@ -262,6 +263,7 @@ public OnClientDisconnect(client)
 	g_ClientMenuState[client][CMS_previewMode] = ZPM_aim;
 	g_ClientMenuState[client][CMS_stepSizeIndex] = DEFAULT_STEPSIZE_INDEX;
 	g_ClientMenuState[client][CMS_aimCapDistance] = -1.0;
+	g_ClientMenuState[client][CMS_changingAimCapDistance] = false;
 	Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
 	Array_Fill(g_ClientMenuState[client][CMS_center], 3, 0.0);
 	ResetZoneAddingState(client);
@@ -519,7 +521,7 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 		
 		// Presses +attack2!
 		// Save current view angles and move the aim target distance cap according to his mouse moving up and down.
-		if(buttons & IN_ATTACK2)
+		if(buttons & IN_ATTACK2 && g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
 		{
 			// Started pressing +attack2?
 			// Save the current angles as a reference.
@@ -540,6 +542,9 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 				{
 					g_ClientMenuState[client][CMS_aimCapDistance] = 0.0;
 				}
+				
+				g_ClientMenuState[client][CMS_changingAimCapDistance] = true;
+				DisplayZonePointEditMenu(client);
 				// TODO: Maybe seperate the g_fAimCapTempAngles and the point the laser should be displayed?
 				// So moving the mouse after it reached the limit moves the point right away again.
 			}
@@ -2581,11 +2586,17 @@ DisplayZonePointEditMenu(client)
 	
 	if (g_ClientMenuState[client][CMS_aimCapDistance] < 0.0)
 	{
-		AddMenuItem(hMenu, "resetaimdistance", "Max. aim distance: Disabled\nHold rightclick and move mouse up and down to change.", ITEMDRAW_DISABLED);
+		Format(sBuffer, sizeof(sBuffer), "Max. aim distance: Disabled");
+		if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
+			Format(sBuffer, sizeof(sBuffer), "%s\nHold rightclick and move mouse up and down to change.", sBuffer);
+		AddMenuItem(hMenu, "resetaimdistance", sBuffer, ITEMDRAW_DISABLED);
 	}
 	else
 	{
-		Format(sBuffer, sizeof(sBuffer), "Max. aim distance: %.2f\nHold rightclick and move mouse up and down to change.\nSelect menu option to remove limit.", g_ClientMenuState[client][CMS_aimCapDistance]);
+		Format(sBuffer, sizeof(sBuffer), "Max. aim distance: %.2f", g_ClientMenuState[client][CMS_aimCapDistance]);
+		if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
+			Format(sBuffer, sizeof(sBuffer), "%s\nHold rightclick and move mouse up and down to change.", sBuffer);
+		Format(sBuffer, sizeof(sBuffer), "%s\nSelect menu option to remove limit.", sBuffer);
 		AddMenuItem(hMenu, "resetaimdistance", sBuffer);
 	}
 	
@@ -2671,9 +2682,18 @@ public Menu_HandleZonePointEdit(Handle:menu, MenuAction:action, param1, param2)
 	}
 	else if(action == MenuAction_Cancel)
 	{
+		// When the player is currently changing the aim distance cap, we're replacing this with ourselves.
+		if(param2 == MenuCancel_Interrupted
+		&& g_ClientMenuState[param1][CMS_changingAimCapDistance])
+		{
+			g_ClientMenuState[param1][CMS_changingAimCapDistance] = false;
+			return;
+		}
+		
 		g_ClientMenuState[param1][CMS_editCenter] = false;
 		g_ClientMenuState[param1][CMS_editPosition] = false;
 		g_ClientMenuState[param1][CMS_editState] = ZES_first;
+		g_ClientMenuState[param1][CMS_changingAimCapDistance] = false;
 		ResetZoneAddingState(param1);
 		if(param2 == MenuCancel_ExitBack)
 		{
@@ -3732,7 +3752,7 @@ bool:GetClientZoneAimPosition(client, Float:fTarget[3])
 	// When a player is currently holding rightclick while editing a zone point position,
 	// he's trying to adjust the maximal distance of the laserpointer point which specifies the target position.
 	// Don't change the pointer position while moving the mouse up and down to change the distance.
-	new bool:bIsAdjustingAimLimit = (GetClientButtons(client) & IN_ATTACK2 == IN_ATTACK2) && IsClientEditingZonePosition(client);
+	new bool:bIsAdjustingAimLimit = g_ClientMenuState[client][CMS_previewMode] == ZPM_aim && (GetClientButtons(client) & IN_ATTACK2 == IN_ATTACK2) && IsClientEditingZonePosition(client);
 	if (bIsAdjustingAimLimit)
 	{
 		fClientAngles = g_fAimCapTempAngles[client];
