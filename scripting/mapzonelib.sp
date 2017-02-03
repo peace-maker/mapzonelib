@@ -508,7 +508,7 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 	
 	// Client is currently editing or adding a zone point.
 	new iRemoveButtons;
-	if (IsClientEditingZonePosition(client))
+	if (IsClientEditingZonePosition(client) && !g_ClientMenuState[client][CMS_disablePreview])
 	{
 		// Started pressing +use
 		// See if he wants to set a zone's position.
