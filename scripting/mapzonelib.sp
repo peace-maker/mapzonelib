@@ -2029,14 +2029,12 @@ public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
 		{
 			decl String:sBuffer[128];
 			new Handle:hPanel = CreatePanel();
-			// TODO: Add option to keep contained zones.
-			Format(sBuffer, sizeof(sBuffer), "Do you really want to delete cluster \"%s\" and all containing zones?", zoneCluster[ZC_name]);
+			Format(sBuffer, sizeof(sBuffer), "Do you really want to delete cluster \"%s\"?", zoneCluster[ZC_name]);
 			SetPanelTitle(hPanel, sBuffer);
 			
-			Format(sBuffer, sizeof(sBuffer), "%T", "Yes", param1);
-			DrawPanelItem(hPanel, sBuffer);
-			Format(sBuffer, sizeof(sBuffer), "%T", "No", param1);
-			DrawPanelItem(hPanel, sBuffer);
+			DrawPanelItem(hPanel, "Yes, delete cluster and all contained zones");
+			DrawPanelItem(hPanel, "Yes, delete cluster, but keep all contained zones");
+			DrawPanelItem(hPanel, "No, DON'T delete anything");
 			
 			SendPanelToClient(hPanel, param1, Panel_HandleConfirmDeleteCluster, MENU_TIME_FOREVER);
 			CloseHandle(hPanel);
@@ -2066,45 +2064,58 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 {
 	if(action == MenuAction_Select)
 	{
-		// Selected "Yes" -> delete the zone.
-		if(param2 == 1)
-		{
-			new group[ZoneGroup], zoneCluster[ZoneCluster];
-			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
-			GetZoneClusterByIndex(g_ClientMenuState[param1][CMS_cluster], group, zoneCluster);
-			
-			// We can't really delete it, because the array indicies would shift. Just don't save it to file and skip it.
-			zoneCluster[ZC_deleted] = true;
-			SaveCluster(group, zoneCluster);
-			
-			// Delete all contained zones in the cluster too.
-			// Make sure the trigger is removed.
-			new iNumZones = GetArraySize(group[ZG_zones]);
-			new zoneData[ZoneData];
-			for(new i=0;i<iNumZones;i++)
-			{
-				GetZoneByIndex(i, group, zoneData);
-				if(zoneData[ZD_deleted])
-					continue;
-				
-				// Only delete zones in this cluster!
-				if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
-					continue;
-				
-				RemoveZoneTrigger(group, zoneData);
-				zoneData[ZD_deleted] = true;
-				SaveZone(group, zoneData);
-			}
-			
-			g_ClientMenuState[param1][CMS_cluster] = -1;
-			DisplayClusterListMenu(param1);
-			
-			LogAction(param1, -1, "%L deleted cluster \"%s\" from group \"%s\".", param1, zoneCluster[ZC_name], group[ZG_name]);
-		}
-		else
+		// Selected "No", go back.
+		if(param2 > 2)
 		{
 			DisplayClusterEditMenu(param1);
+			return;
 		}
+		
+		new group[ZoneGroup], zoneCluster[ZoneCluster];
+		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
+		GetZoneClusterByIndex(g_ClientMenuState[param1][CMS_cluster], group, zoneCluster);
+		
+		// We can't really delete it, because the array indicies would shift. Just don't save it to file and skip it.
+		zoneCluster[ZC_deleted] = true;
+		SaveCluster(group, zoneCluster);
+		
+		// Delete all contained zones in the cluster too.
+		// Make sure the trigger is removed.
+		new iNumZones = GetArraySize(group[ZG_zones]);
+		new zoneData[ZoneData];
+		new iZonesCount;
+		for(new i=0;i<iNumZones;i++)
+		{
+			GetZoneByIndex(i, group, zoneData);
+			if(zoneData[ZD_deleted])
+				continue;
+			
+			// Only delete zones in this cluster!
+			if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
+				continue;
+			
+			// Want to delete the zones in the cluster too?
+			if(param2 == 1)
+			{
+				RemoveZoneTrigger(group, zoneData);
+				zoneData[ZD_deleted] = true;
+			}
+			// Just remove the zone from the cluster, but keep it.
+			else
+			{
+				zoneData[ZD_clusterIndex] = -1;
+			}
+			SaveZone(group, zoneData);
+			iZonesCount++;
+		}
+		
+		g_ClientMenuState[param1][CMS_cluster] = -1;
+		DisplayClusterListMenu(param1);
+		
+		if(param2 == 1)
+			LogAction(param1, -1, "%L deleted cluster \"%s\" and %d contained zones from group \"%s\".", param1, zoneCluster[ZC_name], iZonesCount, group[ZG_name]);
+		else
+			LogAction(param1, -1, "%L deleted cluster \"%s\" from group \"%s\", but kept %d contained zones.", param1, zoneCluster[ZC_name], group[ZG_name], iZonesCount);
 	}
 	else if(action == MenuAction_Cancel)
 	{
