@@ -80,7 +80,7 @@ enum ClientMenuState {
 	ZonePreviewMode:CMS_previewMode,
 	CMS_stepSizeIndex, // index into g_fStepsizes array currently used by the client.
 	Float:CMS_aimCapDistance, // How far away can the aim target wall be at max?
-	bool:CMS_changingAimCapDistance, // Player is currently changing the cap distance using right click?
+	bool:CMS_redrawPointMenu, // Player is currently changing the cap distance using right click?
 	Float:CMS_first[3],
 	Float:CMS_second[3],
 	Float:CMS_rotation[3],
@@ -265,7 +265,7 @@ public OnClientDisconnect(client)
 	g_ClientMenuState[client][CMS_previewMode] = ZPM_aim;
 	g_ClientMenuState[client][CMS_stepSizeIndex] = DEFAULT_STEPSIZE_INDEX;
 	g_ClientMenuState[client][CMS_aimCapDistance] = -1.0;
-	g_ClientMenuState[client][CMS_changingAimCapDistance] = false;
+	g_ClientMenuState[client][CMS_redrawPointMenu] = false;
 	Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
 	Array_Fill(g_ClientMenuState[client][CMS_center], 3, 0.0);
 	ResetZoneAddingState(client);
@@ -545,7 +545,7 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 					g_ClientMenuState[client][CMS_aimCapDistance] = 0.0;
 				}
 				
-				g_ClientMenuState[client][CMS_changingAimCapDistance] = true;
+				g_ClientMenuState[client][CMS_redrawPointMenu] = true;
 				DisplayZonePointEditMenu(client);
 				// TODO: Maybe seperate the g_fAimCapTempAngles and the point the laser should be displayed?
 				// So moving the mouse after it reached the limit moves the point right away again.
@@ -1517,9 +1517,8 @@ DisplayGroupRootMenu(client, group[ZoneGroup])
 	AddMenuItem(hMenu, "paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
 	Format(sBuffer, sizeof(sBuffer), "Show Zones to all: %T", (group[ZG_showZones]?"Yes":"No"), client);
 	AddMenuItem(hMenu, "showzonesall", sBuffer);
-	Format(sBuffer, sizeof(sBuffer), "Show Zones to me only: %T", (group[ZG_adminShowZones][client]?"Yes":"No"), client);
+	Format(sBuffer, sizeof(sBuffer), "Show Zones to me only: %T\n \n", (group[ZG_adminShowZones][client]?"Yes":"No"), client);
 	AddMenuItem(hMenu, "showzonesme", sBuffer);
-	AddMenuItem(hMenu, "", "", ITEMDRAW_SPACER|ITEMDRAW_DISABLED);
 	
 	// Show zone count
 	new iNumZones, zoneData[ZoneData];
@@ -1624,8 +1623,7 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 		{
 			g_ClientMenuState[param1][CMS_addZone] = true;
 			g_ClientMenuState[param1][CMS_editState] = ZES_first;
-			ClearHandle(g_hShowZoneWhileEditTimer[param1]);
-			g_hShowZoneWhileEditTimer[param1] = CreateTimer(0.1, Timer_ShowZoneWhileAdding, GetClientUserId(param1), TIMER_REPEAT);
+			DisplayZonePointEditMenu(param1);
 			PrintToChat(param1, "Map Zones > Click on the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
 		}
 		// Paste zone from clipboard.
@@ -1684,8 +1682,7 @@ DisplayZoneListMenu(client)
 	}
 	SetMenuExitBackButton(hMenu, true);
 
-	AddMenuItem(hMenu, "add", "Add new zone");
-	AddMenuItem(hMenu, "", "", ITEMDRAW_SPACER|ITEMDRAW_DISABLED);
+	AddMenuItem(hMenu, "add", "Add new zone\n \n");
 
 	new String:sBuffer[64];
 	new iNumZones = GetArraySize(group[ZG_zones]);
@@ -1729,8 +1726,7 @@ public Menu_HandleZoneList(Handle:menu, MenuAction:action, param1, param2)
 		{
 			g_ClientMenuState[param1][CMS_addZone] = true;
 			g_ClientMenuState[param1][CMS_editState] = ZES_first;
-			ClearHandle(g_hShowZoneWhileEditTimer[param1]);
-			g_hShowZoneWhileEditTimer[param1] = CreateTimer(0.1, Timer_ShowZoneWhileAdding, GetClientUserId(param1), TIMER_REPEAT);
+			DisplayZonePointEditMenu(param1);
 			PrintToChat(param1, "Map Zones > Click on the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
 			return;
 		}
@@ -1804,8 +1800,7 @@ DisplayClusterListMenu(client)
 	SetMenuTitle(hMenu, "Manage clusters for \"%s\"", group[ZG_name]);
 	SetMenuExitBackButton(hMenu, true);
 
-	AddMenuItem(hMenu, "add", "Add cluster");
-	AddMenuItem(hMenu, "", "", ITEMDRAW_SPACER|ITEMDRAW_DISABLED);
+	AddMenuItem(hMenu, "add", "Add cluster\n \n");
 	
 	new String:sBuffer[64];
 	new iNumClusters = GetArraySize(group[ZG_cluster]);
@@ -2401,8 +2396,7 @@ DisplayClusterSelectionMenu(client)
 	SetMenuTitle(hMenu, "Add zone \"%s\" to cluster:", zoneData[ZD_name]);
 	SetMenuExitBackButton(hMenu, true);
 
-	AddMenuItem(hMenu, "newcluster", "Add new cluster");
-	AddMenuItem(hMenu, "", "", ITEMDRAW_SPACER|ITEMDRAW_DISABLED);
+	AddMenuItem(hMenu, "newcluster", "Add new cluster\n \n");
 	
 	new iNumClusters = GetArraySize(group[ZG_cluster]);
 	new zoneCluster[ZoneCluster], String:sIndex[16], iClusterCount;
@@ -2557,22 +2551,31 @@ DisplayZonePointEditMenu(client)
 	if (!g_hShowZoneWhileEditTimer[client])
 		g_hShowZoneWhileEditTimer[client] = CreateTimer(0.1, Timer_ShowZoneWhileAdding, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE|TIMER_REPEAT);
 
-	new group[ZoneGroup], zoneData[ZoneData];
+	new group[ZoneGroup];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
-	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 	
 	new Handle:hMenu = CreateMenu(Menu_HandleZonePointEdit);
-	if(g_ClientMenuState[client][CMS_editCenter])
+	if(g_ClientMenuState[client][CMS_addZone])
 	{
-		SetMenuTitle(hMenu, "Edit zone \"%s\" center\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name]);
+		SetMenuTitle(hMenu, "Add new zone > Position %d\nClick on the point or push \"e\" to set it at your feet.", _:g_ClientMenuState[client][CMS_editState]+1);
 	}
 	else
 	{
-		SetMenuTitle(hMenu, "Edit zone \"%s\" position %d\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name], _:g_ClientMenuState[client][CMS_editState]+1);
+		new zoneData[ZoneData];
+		GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
+		if(g_ClientMenuState[client][CMS_editCenter])
+		{
+			SetMenuTitle(hMenu, "Edit zone \"%s\" center\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name]);
+		}
+		else
+		{
+			SetMenuTitle(hMenu, "Edit zone \"%s\" position %d\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name], _:g_ClientMenuState[client][CMS_editState]+1);
+		}
 	}
 	SetMenuExitBackButton(hMenu, true);
 
-	AddMenuItem(hMenu, "save", "Save changes");
+	if(!g_ClientMenuState[client][CMS_addZone])
+		AddMenuItem(hMenu, "save", "Save changes");
 	
 	new String:sBuffer[256] = "Show preview: ";
 	switch (g_ClientMenuState[client][CMS_previewMode])
@@ -2586,8 +2589,11 @@ DisplayZonePointEditMenu(client)
 	}
 	AddMenuItem(hMenu, "togglepreview", sBuffer);
 	
-	Format(sBuffer, sizeof(sBuffer), "Stepsize: %.0f", g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
-	AddMenuItem(hMenu, "togglestepsize", sBuffer);
+	if(!g_ClientMenuState[client][CMS_addZone])
+	{
+		Format(sBuffer, sizeof(sBuffer), "Stepsize: %.0f", g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
+		AddMenuItem(hMenu, "togglestepsize", sBuffer);
+	}
 	
 	if (g_ClientMenuState[client][CMS_aimCapDistance] < 0.0)
 	{
@@ -2605,7 +2611,8 @@ DisplayZonePointEditMenu(client)
 		AddMenuItem(hMenu, "resetaimdistance", sBuffer);
 	}
 	
-	AddMenuItem(hMenu, "axismenu", "Move point on axes through menu");
+	if(!g_ClientMenuState[client][CMS_addZone])
+		AddMenuItem(hMenu, "axismenu", "Move point on axes through menu");
 	
 	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
 }
@@ -2621,12 +2628,13 @@ public Menu_HandleZonePointEdit(Handle:menu, MenuAction:action, param1, param2)
 		new String:sInfo[32];
 		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
 		
-		new group[ZoneGroup], zoneData[ZoneData];
+		new group[ZoneGroup];
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
-		GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
 		
 		if(StrEqual(sInfo, "save"))
 		{
+			new zoneData[ZoneData];
+			GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
 			// Save the new center of the zone.
 			// The rotation and mins/maxs stay the same, so not much to do.
 			if(g_ClientMenuState[param1][CMS_editCenter])
@@ -2689,20 +2697,24 @@ public Menu_HandleZonePointEdit(Handle:menu, MenuAction:action, param1, param2)
 	{
 		// When the player is currently changing the aim distance cap, we're replacing this with ourselves.
 		if(param2 == MenuCancel_Interrupted
-		&& g_ClientMenuState[param1][CMS_changingAimCapDistance])
+		&& g_ClientMenuState[param1][CMS_redrawPointMenu])
 		{
-			g_ClientMenuState[param1][CMS_changingAimCapDistance] = false;
+			g_ClientMenuState[param1][CMS_redrawPointMenu] = false;
 			return;
 		}
 		
+		new bool:bAdding = g_ClientMenuState[param1][CMS_addZone];
 		g_ClientMenuState[param1][CMS_editCenter] = false;
 		g_ClientMenuState[param1][CMS_editPosition] = false;
 		g_ClientMenuState[param1][CMS_editState] = ZES_first;
-		g_ClientMenuState[param1][CMS_changingAimCapDistance] = false;
+		g_ClientMenuState[param1][CMS_redrawPointMenu] = false;
 		ResetZoneAddingState(param1);
 		if(param2 == MenuCancel_ExitBack)
 		{
-			DisplayZoneEditDetailsMenu(param1);
+			if(bAdding)
+				DisplayZoneListMenu(param1);
+			else
+				DisplayZoneEditDetailsMenu(param1);
 		}
 		else
 		{
@@ -2935,7 +2947,7 @@ public Menu_HandleAddFinalization(Handle:menu, MenuAction:action, param1, param2
 			// In case we were pasting a zone from clipboard.
 			g_ClientMenuState[param1][CMS_editCenter] = false;
 			if(g_ClientMenuState[param1][CMS_cluster] == -1)
-				DisplayGroupRootMenu(param1, group);
+				DisplayZoneListMenu(param1);
 			else
 				DisplayClusterEditMenu(param1);
 		}
@@ -2953,9 +2965,7 @@ public Menu_HandleAddFinalization(Handle:menu, MenuAction:action, param1, param2
 			}
 			else
 			{
-				new group[ZoneGroup];
-				GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
-				DisplayGroupRootMenu(param1, group);
+				DisplayZoneListMenu(param1);
 			}
 		}
 		// Only reset state, if we didn't type a name in chat!
@@ -3708,6 +3718,8 @@ HandleZonePositionSetting(client, const Float:fOrigin[3])
 			if(g_ClientMenuState[client][CMS_addZone])
 			{
 				g_ClientMenuState[client][CMS_editState] = ZES_second;
+				g_ClientMenuState[client][CMS_redrawPointMenu] = true;
+				DisplayZonePointEditMenu(client);
 				PrintToChat(client, "Map Zones > Now click on the opposing diagonal edge of the zone or push \"e\" to set it at your feet.");
 			}
 			else
@@ -3733,6 +3745,7 @@ HandleZonePositionSetting(client, const Float:fOrigin[3])
 			if(g_ClientMenuState[client][CMS_addZone])
 			{
 				g_ClientMenuState[client][CMS_editState] = ZES_name;
+				g_ClientMenuState[client][CMS_redrawPointMenu] = true;
 				DisplayZoneAddFinalizationMenu(client);
 				PrintToChat(client, "Map Zones > Please type a name for this zone in chat. Type \"!abort\" to abort.");
 			}
