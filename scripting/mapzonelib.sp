@@ -620,8 +620,8 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 				Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
 				Array_Copy(g_ClientMenuState[client][CMS_rotation], fAngles, 3);
 				
-				Effect_DrawBeamBoxRotatableToClient(client, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 5.0, 5.0, 2, 1.0, {0,0,255,255}, 0);
-				Effect_DrawAxisOfRotationToClient(client, fPos, fAngles, Float:{10.0,10.0,10.0}, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 5.0, 5.0, 2, 1.0, 0);
+				Effect_DrawBeamBoxRotatableToClient(client, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
+				Effect_DrawAxisOfRotationToClient(client, fPos, fAngles, Float:{20.0,20.0,20.0}, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, 0);
 			}
 		}
 		// Show the laser box at the new position for a longer time.
@@ -1338,7 +1338,7 @@ public Action:Timer_ShowZones(Handle:timer)
 			}
 			
 			if(iNumClients > 0)
-				Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, iColor, 5);
+				Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, iColor, 5);
 		}
 	}
 	
@@ -1400,8 +1400,8 @@ public Action:Timer_ShowZones(Handle:timer)
 			}
 			
 			// Draw the zone
-			Effect_DrawBeamBoxRotatableToClient(i, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, {0,0,255,255}, 0);
-			Effect_DrawAxisOfRotationToClient(i, fPos, fAngles, Float:{10.0,10.0,10.0}, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 5.0, 5.0, 2, 1.0, 0);
+			Effect_DrawBeamBoxRotatableToClient(i, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
+			Effect_DrawAxisOfRotationToClient(i, fPos, fAngles, Float:{20.0,20.0,20.0}, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, 0);
 		}
 	}
 	
@@ -1424,7 +1424,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 			Array_Copy(g_ClientMenuState[client][CMS_first], fFirstPoint, 3);
 			Array_Copy(g_ClientMenuState[client][CMS_second], fSecondPoint, 3);
 			
-			Effect_DrawBeamBoxToClient(client, fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 5.0, 5.0, 2, 1.0, {0,0,255,255}, 0);
+			Effect_DrawBeamBoxToClient(client, fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
 		}
 		return Plugin_Continue;
 	}
@@ -1497,7 +1497,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 			Array_Copy(zoneData[ZD_mins], fMins, 3);
 			Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
 			
-			Effect_DrawBeamBoxRotatableToClient(client, fCenter, fMins, fMaxs, fRotation, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 5.0, 5.0, 2, 1.0, {0,0,255,255}, 0);
+			Effect_DrawBeamBoxRotatableToClient(client, fCenter, fMins, fMaxs, fRotation, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
 			return Plugin_Continue;
 		}
 		
@@ -1519,7 +1519,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 		}
 		
 		// TODO: When editing a zone, apply the rotation again.
-		Effect_DrawBeamBoxToClient(client, fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 5.0, 5.0, 2, 1.0, {0,0,255,255}, 0);
+		Effect_DrawBeamBoxToClient(client, fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
 	}
 	
 	return Plugin_Continue;
