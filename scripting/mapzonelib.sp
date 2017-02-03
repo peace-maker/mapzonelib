@@ -535,8 +535,8 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 		// See if he wants to set a zone's position.
 		if(buttons & IN_ATTACK && !(g_iClientButtons[client] & IN_ATTACK))
 		{
-			new Float:fAimPosition[3];
-			if (GetClientZoneAimPosition(client, fAimPosition))
+			new Float:fAimPosition[3], Float:fUnsnappedAimPosition[3];
+			if (GetClientZoneAimPosition(client, fAimPosition, fUnsnappedAimPosition))
 				HandleZonePositionSetting(client, fAimPosition);
 			// Don't let that action go through.
 			iRemoveButtons |= IN_ATTACK;
@@ -1435,23 +1435,56 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 	}
 	
 	// Get the client's aim position.
-	new Float:fAimPosition[3];
-	if (!GetClientZoneAimPosition(client, fAimPosition))
+	new Float:fAimPosition[3], Float:fUnsnappedAimPosition[3];
+	if (!GetClientZoneAimPosition(client, fAimPosition, fUnsnappedAimPosition))
 		return Plugin_Continue;
 	
-	// Show an indicator on where the client aims at.
-	TE_SetupGlowSprite(fAimPosition, g_iGlowSprite, 0.1, 0.1, 150);
-	TE_SendToClient(client);
+	// Show an indicator on where the client aims at if not preview the feet position.
+	if (g_ClientMenuState[client][CMS_previewMode] != ZPM_feet)
+	{
+		TE_SetupGlowSprite(fAimPosition, g_iGlowSprite, 0.1, 0.1, 150);
+		TE_SendToClient(client);
+	}
+	
+	// Don't show anything when preview is disabled.
+	if(g_ClientMenuState[client][CMS_previewMode] == ZPM_disabled)
+		return Plugin_Continue;
+	
+	// Get the snapped and unsnapped target positions now.
+	// Unsnapped, so we can draw a line between the points to show the user where it'll snap to.
+	new Float:fTargetPosition[3], Float:fUnsnappedTargetPosition[3];
+	if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
+	{
+		fTargetPosition = fAimPosition;
+		fUnsnappedTargetPosition = fUnsnappedAimPosition;
+	}
+	else
+	{
+		GetClientAbsOrigin(client, fUnsnappedTargetPosition);
+		fTargetPosition = fUnsnappedTargetPosition;
+		SnapToGrid(client, fTargetPosition);
+		
+		// Put the start position a little bit higher and behind the player.
+		// That way you still see the beam, even if it's right below you.
+		fUnsnappedTargetPosition[2] += 32.0;
+		new Float:fViewDirection[3];
+		GetClientEyeAngles(client, fViewDirection);
+		fViewDirection[0] = 0.0; // Ignore up/down view.
+		GetAngleVectors(fViewDirection, fViewDirection, NULL_VECTOR, NULL_VECTOR);
+		ScaleVector(fViewDirection, -16.0);
+		AddVectors(fUnsnappedTargetPosition, fViewDirection, fUnsnappedTargetPosition);
+	}
+	
+	// Show a beam from player position to snapped grid corner.
+	if ((g_ClientMenuState[client][CMS_snapToGrid] != GSM_disabled || g_ClientMenuState[client][CMS_previewMode] == ZPM_feet)
+	&& IsClientEditingZonePosition(client))
+		ShowGridSnapBeamToClient(client, fUnsnappedTargetPosition, fTargetPosition);
 	
 	// Preview the zone in realtime while editing.
 	if (g_ClientMenuState[client][CMS_editCenter]
 	|| g_ClientMenuState[client][CMS_editPosition]
 	|| g_ClientMenuState[client][CMS_editState] == ZES_second)
 	{
-		// Don't show anything when preview is disabled.
-		if(g_ClientMenuState[client][CMS_previewMode] == ZPM_disabled)
-			return Plugin_Continue;
-		
 		// When editing the center, we can display the rotation too :)
 		if (g_ClientMenuState[client][CMS_editCenter])
 		{
@@ -1461,17 +1494,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 			
 			// Only change the center of the box, keep all the other paramters the same.
 			new Float:fCenter[3], Float:fRotation[3], Float:fMins[3], Float:fMaxs[3];
-			// Use aim target position if that's the preview mode.
-			if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
-			{
-				Array_Copy(fAimPosition, fCenter, 3);
-			}
-			// Or the client's position if that's better.
-			else
-			{
-				GetClientAbsOrigin(client, fCenter);
-				SnapToGrid(client, fCenter);
-			}
+			fCenter = fTargetPosition;
 			Array_Copy(zoneData[ZD_rotation], fRotation, 3);
 			Array_Copy(zoneData[ZD_mins], fMins, 3);
 			Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
@@ -1484,34 +1507,16 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 		// Copy the right other coordinate from the zone over.
 		if (g_ClientMenuState[client][CMS_editState] == ZES_first)
 		{
-			// Use aim target position if that's the preview mode.
-			if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
-			{
-				Array_Copy(fAimPosition, fFirstPoint, 3);
-			}
-			// Or the client's position if that's better.
-			else
-			{
-				GetClientAbsOrigin(client, fFirstPoint);
-				SnapToGrid(client, fFirstPoint);
-			}
+			fFirstPoint = fTargetPosition;
+			
 			Array_Copy(g_ClientMenuState[client][CMS_second], fSecondPoint, 3);
 			HandleZoneDefaultHeight(fFirstPoint[2], fSecondPoint[2]);
 		}
 		else
 		{
 			Array_Copy(g_ClientMenuState[client][CMS_first], fFirstPoint, 3);
-			// Use aim target position if that's the preview mode.
-			if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
-			{
-				Array_Copy(fAimPosition, fSecondPoint, 3);
-			}
-			// Or the client's position if that's better.
-			else
-			{
-				GetClientAbsOrigin(client, fSecondPoint);
-				SnapToGrid(client, fSecondPoint);
-			}
+			fSecondPoint = fTargetPosition;
+			
 			HandleZoneDefaultHeight(fFirstPoint[2], fSecondPoint[2]);
 		}
 		
@@ -1520,6 +1525,12 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 	}
 	
 	return Plugin_Continue;
+}
+
+ShowGridSnapBeamToClient(client, Float:fFirstPoint[3], Float:fSecondPoint[3])
+{
+	TE_SetupBeamPoints(fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 1.0, 1.0, 2, 1.0, {0,255,0,255}, 0);
+	TE_SendToClient(client);
 }
 
 /**
@@ -1837,7 +1848,7 @@ DisplayClusterListMenu(client)
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	
 	new Handle:hMenu = CreateMenu(Menu_HandleClusterList);
-	SetMenuTitle(hMenu, "Manage clusters for \"%s\"", group[ZG_name]);
+	SetMenuTitle(hMenu, "Manage clusters for \"%s\"\nZones in a cluster will act like one big zone.\nAllows for different shapes than just rectangles.", group[ZG_name]);
 	SetMenuExitBackButton(hMenu, true);
 
 	AddMenuItem(hMenu, "add", "Add cluster\n \n");
@@ -2640,11 +2651,8 @@ DisplayZonePointEditMenu(client)
 	}
 	AddMenuItem(hMenu, "togglepreview", sBuffer);
 	
-	if(!g_ClientMenuState[client][CMS_addZone])
-	{
-		Format(sBuffer, sizeof(sBuffer), "Stepsize: %.0f", g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
-		AddMenuItem(hMenu, "togglestepsize", sBuffer);
-	}
+	Format(sBuffer, sizeof(sBuffer), "Stepsize: %.0f", g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
+	AddMenuItem(hMenu, "togglestepsize", sBuffer);
 	
 	if (g_ClientMenuState[client][CMS_aimCapDistance] < 0.0)
 	{
@@ -3829,7 +3837,7 @@ HandleZonePositionSetting(client, const Float:fOrigin[3])
 	}
 }
 
-bool:GetClientZoneAimPosition(client, Float:fTarget[3])
+bool:GetClientZoneAimPosition(client, Float:fTarget[3], Float:fUnsnappedTarget[3])
 {
 	new Float:fClientPosition[3], Float:fClientAngles[3];
 	GetClientEyePosition(client, fClientPosition);
@@ -3858,6 +3866,7 @@ bool:GetClientZoneAimPosition(client, Float:fTarget[3])
 	if (bDidHit)
 	{
 		TR_GetEndPosition(fTarget);
+		fUnsnappedTarget = fTarget;
 		
 		// Snap the point to the grid, if the user wants it.
 		SnapToGrid(client, fTarget);
@@ -3890,6 +3899,7 @@ bool:GetClientZoneAimPosition(client, Float:fTarget[3])
 	ScaleVector(fAimDirection, g_ClientMenuState[client][CMS_aimCapDistance]);
 	AddVectors(fClientPosition, fAimDirection, fTarget);
 	
+	fUnsnappedTarget = fTarget;
 	SnapToGrid(client, fTarget);
 	
 	return true;
