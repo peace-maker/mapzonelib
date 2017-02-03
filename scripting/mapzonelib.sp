@@ -1321,6 +1321,10 @@ public Action:Timer_ShowZones(Handle:timer)
 		|| g_ClientMenuState[i][CMS_editRotation]
 		|| g_ClientMenuState[i][CMS_editCenter])
 		{
+			// Currently pasting a zone. Wait until user gives a name before showing anything.
+			if(g_ClientMenuState[i][CMS_zone] == -1 && g_ClientMenuState[i][CMS_editCenter])
+				continue;
+				
 			GetGroupByIndex(g_ClientMenuState[i][CMS_group], group);
 			GetZoneByIndex(g_ClientMenuState[i][CMS_zone], group, zoneData);
 			
@@ -2905,7 +2909,7 @@ DisplayZoneAddFinalizationMenu(client)
 	// When pasting a zone we want to edit the center position afterwards right away.
 	if(g_ClientMenuState[client][CMS_editCenter])
 	{
-		Format(sBuffer, sizeof(sBuffer), "Pasting new copy of zone \"%s\".", g_Clipboard[client][CB_name]);
+		Format(sBuffer, sizeof(sBuffer), "Pasting new copy of zone \"%s\".\nYou can place the copy after giving it a name.", g_Clipboard[client][CB_name]);
 		AddMenuItem(hMenu, "", sBuffer, ITEMDRAW_DISABLED);
 	}
 	
