@@ -65,12 +65,6 @@ enum ZonePreviewMode {
 #define DEFAULT_STEPSIZE_INDEX 3
 new Float:g_fStepsizes[] = {1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0};
 
-enum GridSnapMode {
-	GSM_disabled,
-	GSM_snapXY,
-	GSM_snapXYZ
-}
-
 enum ClientMenuState {
 	CMS_group,
 	CMS_cluster,
@@ -87,7 +81,7 @@ enum ClientMenuState {
 	CMS_stepSizeIndex, // index into g_fStepsizes array currently used by the client.
 	Float:CMS_aimCapDistance, // How far away can the aim target wall be at max?
 	bool:CMS_redrawPointMenu, // Player is currently changing the cap distance using right click?
-	GridSnapMode:CMS_snapToGrid, // Snap to the nearest grid corner when assuming a grid size of CMS_stepSizeIndex.
+	bool:CMS_snapToGrid, // Snap to the nearest grid corner when assuming a grid size of CMS_stepSizeIndex.
 	Float:CMS_first[3],
 	Float:CMS_second[3],
 	Float:CMS_rotation[3],
@@ -278,7 +272,7 @@ public OnClientDisconnect(client)
 	g_ClientMenuState[client][CMS_stepSizeIndex] = DEFAULT_STEPSIZE_INDEX;
 	g_ClientMenuState[client][CMS_aimCapDistance] = -1.0;
 	g_ClientMenuState[client][CMS_redrawPointMenu] = false;
-	g_ClientMenuState[client][CMS_snapToGrid] = GSM_disabled;
+	g_ClientMenuState[client][CMS_snapToGrid] = false;
 	Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
 	Array_Fill(g_ClientMenuState[client][CMS_center], 3, 0.0);
 	ResetZoneAddingState(client);
@@ -520,13 +514,13 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 		// See if he wants to set a zone's position.
 		if(buttons & IN_USE && !(g_iClientButtons[client] & IN_USE))
 		{
-			new Float:fOrigin[3];
-			GetClientAbsOrigin(client, fOrigin);
+			new Float:fUnsnappedOrigin[3], Float:fSnappedOrigin[3], Float:fGroundNormal[3];
+			GetClientFeetPosition(client, fUnsnappedOrigin, fGroundNormal);
 			
 			// Snap the position to the grid if user wants it.
-			SnapToGrid(client, fOrigin);
+			SnapToGrid(client, fUnsnappedOrigin, fSnappedOrigin, fGroundNormal);
 			
-			HandleZonePositionSetting(client, fOrigin);
+			HandleZonePositionSetting(client, fSnappedOrigin);
 			
 			// Don't let that action go through.
 			iRemoveButtons |= IN_USE;
@@ -1461,9 +1455,12 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 	}
 	else
 	{
-		GetClientAbsOrigin(client, fUnsnappedTargetPosition);
-		fTargetPosition = fUnsnappedTargetPosition;
-		SnapToGrid(client, fTargetPosition);
+		new Float:fGroundNormal[3];
+		GetClientFeetPosition(client, fUnsnappedTargetPosition, fGroundNormal);
+		SnapToGrid(client, fUnsnappedTargetPosition, fTargetPosition, fGroundNormal);
+		
+		TE_SetupGlowSprite(fTargetPosition, g_iGlowSprite, 0.1, 0.7, 150);
+		TE_SendToClient(client);
 		
 		// Put the start position a little bit higher and behind the player.
 		// That way you still see the beam, even if it's right below you.
@@ -1477,7 +1474,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 	}
 	
 	// Show a beam from player position to snapped grid corner.
-	if ((g_ClientMenuState[client][CMS_snapToGrid] != GSM_disabled || g_ClientMenuState[client][CMS_previewMode] == ZPM_feet)
+	if ((g_ClientMenuState[client][CMS_snapToGrid] || g_ClientMenuState[client][CMS_previewMode] == ZPM_feet)
 	&& IsClientEditingZonePosition(client))
 		ShowGridSnapBeamToClient(client, fUnsnappedTargetPosition, fTargetPosition);
 	
@@ -2669,15 +2666,7 @@ DisplayZonePointEditMenu(client)
 		AddMenuItem(hMenu, "resetaimdistance", sBuffer);
 	}
 	
-	switch(g_ClientMenuState[client][CMS_snapToGrid])
-	{
-		case GSM_disabled:
-			Format(sBuffer, sizeof(sBuffer), "Snap to map grid: Disabled");
-		case GSM_snapXY:
-			Format(sBuffer, sizeof(sBuffer), "Snap to map grid: Enabled (no vertical snapping)");
-		case GSM_snapXYZ:
-			Format(sBuffer, sizeof(sBuffer), "Snap to map grid: Enabled (WITH vertical snapping)");
-	}
+	Format(sBuffer, sizeof(sBuffer), "Snap to map grid: %s", g_ClientMenuState[client][CMS_snapToGrid]?"Enabled":"Disabled");
 	AddMenuItem(hMenu, "togglegridsnap", sBuffer);
 	
 	if(!g_ClientMenuState[client][CMS_addZone])
@@ -2761,8 +2750,7 @@ public Menu_HandleZonePointEdit(Handle:menu, MenuAction:action, param1, param2)
 		}
 		else if(StrEqual(sInfo, "togglegridsnap"))
 		{
-			g_ClientMenuState[param1][CMS_snapToGrid]++;
-			g_ClientMenuState[param1][CMS_snapToGrid] %= GridSnapMode;
+			g_ClientMenuState[param1][CMS_snapToGrid] = !g_ClientMenuState[param1][CMS_snapToGrid];
 		}
 		
 		DisplayZonePointEditMenu(param1);
@@ -3861,15 +3849,24 @@ bool:GetClientZoneAimPosition(client, Float:fTarget[3], Float:fUnsnappedTarget[3
 	bDidHit = TR_DidHit();
 	
 	// See if we need to cap it.
-	new Float:fAimDirection[3];
+	new Float:fAimDirection[3], Float:fTargetNormal[3];
 	// We did hit something over there.
 	if (bDidHit)
 	{
-		TR_GetEndPosition(fTarget);
-		fUnsnappedTarget = fTarget;
+		TR_GetEndPosition(fUnsnappedTarget);
+		
+		TR_GetPlaneNormal(INVALID_HANDLE, fTargetNormal);
+		NormalizeVector(fTargetNormal, fTargetNormal);
+		
+		// Make sure the normal is facing the player.
+		new Float:fDirectionToPlayer[3];
+		MakeVectorFromPoints(fUnsnappedTarget, fClientPosition, fDirectionToPlayer);
+		NormalizeVector(fDirectionToPlayer, fDirectionToPlayer);
+		if(GetVectorDotProduct(fDirectionToPlayer, fTargetNormal) < 0)
+			NegateVector(fTargetNormal);
 		
 		// Snap the point to the grid, if the user wants it.
-		SnapToGrid(client, fTarget);
+		SnapToGrid(client, fUnsnappedTarget, fTarget, fTargetNormal);
 		
 		MakeVectorFromPoints(fClientPosition, fTarget, fAimDirection);
 		
@@ -3897,29 +3894,137 @@ bool:GetClientZoneAimPosition(client, Float:fTarget[3], Float:fUnsnappedTarget[3
 	GetAngleVectors(fClientAngles, fAimDirection, NULL_VECTOR, NULL_VECTOR);
 	NormalizeVector(fAimDirection, fAimDirection);
 	ScaleVector(fAimDirection, g_ClientMenuState[client][CMS_aimCapDistance]);
-	AddVectors(fClientPosition, fAimDirection, fTarget);
-	
-	fUnsnappedTarget = fTarget;
-	SnapToGrid(client, fTarget);
+	AddVectors(fClientPosition, fAimDirection, fUnsnappedTarget);
+
+	SnapToGrid(client, fUnsnappedTarget, fTarget, fTargetNormal);
 	
 	return true;
 }
 
-SnapToGrid(client, Float:fPoint[3])
+// Get ground position and normal for the position the player is standing on.
+bool:GetClientFeetPosition(client, Float:fFeetPosition[3], Float:fGroundNormal[3])
+{
+	new Float:fOrigin[3];
+	GetClientAbsOrigin(client, fOrigin);
+	fFeetPosition = fOrigin;
+	
+	// Trace directly downwards
+	fOrigin[2] += 16.0;
+	TR_TraceRayFilter(fOrigin, Float:{90.0,0.0,0.0}, MASK_PLAYERSOLID, RayType_Infinite, RayFilter_DontHitPlayers);
+	if (TR_DidHit())
+	{
+		TR_GetEndPosition(fOrigin);
+		TR_GetPlaneNormal(INVALID_HANDLE, fGroundNormal);
+		NormalizeVector(fGroundNormal, fGroundNormal);
+		
+		// Make sure the normal is facing the player.
+		new Float:fDirectionToPlayer[3];
+		MakeVectorFromPoints(fOrigin, fFeetPosition, fDirectionToPlayer);
+		NormalizeVector(fDirectionToPlayer, fDirectionToPlayer);
+		if(GetVectorDotProduct(fDirectionToPlayer, fGroundNormal) < 0)
+			NegateVector(fGroundNormal);
+		
+		return true;
+	}
+	return false;
+}
+
+SnapToGrid(client, Float:fPoint[3], Float:fSnappedPoint[3], Float:fTargetNormal[3])
 {
 	// User has this disabled.
-	if(g_ClientMenuState[client][CMS_snapToGrid] == GSM_disabled)
-		return;
-		
-	int iSnapDimensions = 2;
-	if(g_ClientMenuState[client][CMS_snapToGrid] == GSM_snapXYZ)
-		iSnapDimensions = 3;
-	
-	new Float:fStepsize = g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]];
-	for(new i=0; i<iSnapDimensions; i++)
+	if(!g_ClientMenuState[client][CMS_snapToGrid])
 	{
-		fPoint[i] = RoundToNearest(fPoint[i] / fStepsize) * fStepsize;
+		fSnappedPoint = fPoint;
+		return;
 	}
+		
+	new Float:fStepsize = g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]];
+	for(new i=0; i<3; i++)
+	{
+		fSnappedPoint[i] = RoundToNearest(fPoint[i] / fStepsize) * fStepsize;
+	}
+	
+	// Snap to walls!
+	// See if the grid snapped behind the target point.
+	if (!Math_VectorsEqual(fTargetNormal, Float:{0.0,0.0,0.0}))
+	{
+		new Float:fSnappedDirection[3];
+		MakeVectorFromPoints(fPoint, fSnappedPoint, fSnappedDirection);
+		NormalizeVector(fSnappedDirection, fSnappedDirection);
+		// The grid point is behind the end position. Bring it forward again.
+		if (GetVectorDotProduct(fTargetNormal, fSnappedDirection) < 0.0)
+		{
+			// Trace back to the wall.
+			if(Math_GetLinePlaneIntersection(fSnappedPoint, fTargetNormal, fPoint, fTargetNormal, fSnappedPoint))
+			{
+				// And a bit further.
+				ScaleVector(fTargetNormal, 0.01);
+				AddVectors(fSnappedPoint, fTargetNormal, fSnappedPoint);
+			}
+		}
+		
+		new bool:bChanged;
+		do
+		{
+			bChanged = false;
+			// See if we're still behind some other wall after moving the point toward the normal again.
+			new Float:fAngles[3];
+			MakeVectorFromPoints(fPoint, fSnappedPoint, fSnappedDirection);
+			NormalizeVector(fSnappedDirection, fSnappedDirection);
+			GetVectorAngles(fSnappedDirection, fAngles);
+			
+			TR_TraceRayFilter(fPoint, fAngles, MASK_PLAYERSOLID, RayType_Infinite, RayFilter_DontHitPlayers);
+			if (!TR_DidHit())
+				return;
+			
+			new Float:fOtherWall[3], Float:fOtherWallDirection[3];
+			TR_GetEndPosition(fOtherWall);
+			MakeVectorFromPoints(fOtherWall, fSnappedPoint, fOtherWallDirection);
+			NormalizeVector(fOtherWallDirection, fOtherWallDirection);
+			
+			TR_GetPlaneNormal(INVALID_HANDLE, fTargetNormal);
+			NormalizeVector(fTargetNormal, fTargetNormal);
+			
+			// Make sure the normal is facing the player.
+			new Float:fDirectionToPlayer[3];
+			MakeVectorFromPoints(fOtherWall, fPoint, fDirectionToPlayer);
+			NormalizeVector(fDirectionToPlayer, fDirectionToPlayer);
+			if(GetVectorDotProduct(fDirectionToPlayer, fTargetNormal) < 0)
+				NegateVector(fTargetNormal);
+			
+			// The grid point is behind some other wall too.
+			if (GetVectorDotProduct(fTargetNormal, fOtherWallDirection) < 0.0)
+			{
+				// Trace back to the wall.
+				if (Math_GetLinePlaneIntersection(fSnappedPoint, fTargetNormal, fOtherWall, fTargetNormal, fSnappedPoint))
+				{
+					// And a bit further.
+					ScaleVector(fTargetNormal, 0.01);
+					AddVectors(fSnappedPoint, fTargetNormal, fSnappedPoint);
+					bChanged = true;
+				}
+			}
+		}
+		while (bChanged);
+	}
+}
+
+bool:Math_GetLinePlaneIntersection(Float:fLinePoint[3], Float:fLineDirection[3], Float:fPlanePoint[3], Float:fPlaneNormal[3], Float:fCollisionPoint[3])
+{
+	new Float:fCos = GetVectorDotProduct(fLineDirection, fPlaneNormal);
+	// Line is parallel to the plane. No single intersection point.
+	if (fCos == 0.0)
+		return false;
+	
+	new Float:fTowardsPlane[3];
+	SubtractVectors(fPlanePoint, fLinePoint, fTowardsPlane);
+	
+	new Float:fDistance = GetVectorDotProduct(fTowardsPlane, fPlaneNormal) / fCos;
+	new Float:fMoveOnLine[3];
+	fMoveOnLine = fLineDirection;
+	ScaleVector(fMoveOnLine, fDistance);
+	AddVectors(fLinePoint, fMoveOnLine, fCollisionPoint);
+	return true;
 }
 
 // Handle the default height of a zone when it's too flat.
@@ -4172,4 +4277,9 @@ Vector_GetMiddleBetweenPoints(const Float:vec1[3], const Float:vec2[3], Float:re
 public bool:RayFilter_DontHitSelf(entity, contentsMask, any:data)
 {
 	return entity != data;
+}
+
+public bool:RayFilter_DontHitPlayers(entity, contentsMask, any:data)
+{
+	return entity < 1 && entity > MaxClients;
 }
