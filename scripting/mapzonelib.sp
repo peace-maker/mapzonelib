@@ -512,6 +512,7 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 	static s_tickinterval[MAXPLAYERS+1];
 	
 	// Client is currently editing or adding a zone point.
+	new iRemoveButtons;
 	if (IsClientEditingZonePosition(client))
 	{
 		// Started pressing +use
@@ -525,6 +526,9 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 			SnapToGrid(client, fOrigin);
 			
 			HandleZonePositionSetting(client, fOrigin);
+			
+			// Don't let that action go through.
+			iRemoveButtons |= IN_USE;
 		}
 		
 		// Started pressing +attack
@@ -534,6 +538,8 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 			new Float:fAimPosition[3];
 			if (GetClientZoneAimPosition(client, fAimPosition))
 				HandleZonePositionSetting(client, fAimPosition);
+			// Don't let that action go through.
+			iRemoveButtons |= IN_ATTACK;
 		}
 		
 		// Presses +attack2!
@@ -572,12 +578,8 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 			// Don't move the view while changing the culling limit.
 			angles = g_fAimCapTempAngles[client];
 			
-			// Need to save the buttons too due to early exit.
-			g_iClientButtons[client] = buttons;
-			// Remove the button after saving it, so we still know when the player stops pressing the button,
-			// but don't actually run the command.
-			buttons &= ~IN_ATTACK2;
-			return Plugin_Changed;
+			// Don't let that action go through.
+			iRemoveButtons |= IN_ATTACK2;
 		}
 	}
 		
@@ -635,6 +637,14 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 	}
 	
 	g_iClientButtons[client] = buttons;
+	
+	// Remove the buttons after saving them, so we know when someone stopped pressing a button.
+	if (iRemoveButtons != 0)
+	{
+		buttons &= ~iRemoveButtons;
+		return Plugin_Changed;
+	}
+	
 	return Plugin_Continue;
 }
 
