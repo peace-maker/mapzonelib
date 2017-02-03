@@ -2794,7 +2794,8 @@ DisplayPointAxisModificationMenu(client)
 	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 	
 	new Handle:hMenu = CreateMenu(Menu_HandlePointAxisEdit);
-	SetMenuExitBackButton(hMenu, true);
+	SetMenuPagination(hMenu, MENU_NO_PAGINATION);
+	SetMenuExitButton(hMenu, true);
 	
 	new String:sBuffer[256];
 	if(g_ClientMenuState[client][CMS_editCenter])
@@ -2805,15 +2806,22 @@ DisplayPointAxisModificationMenu(client)
 	{
 		Format(sBuffer, sizeof(sBuffer), "Edit zone \"%s\" position %d", zoneData[ZD_name], _:g_ClientMenuState[client][CMS_editState]+1);
 	}
-	Format(sBuffer, sizeof(sBuffer), "%s\nMove position along the axes.\nStepsize: %.f\n\nGo back to save changes!", sBuffer, g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
+	Format(sBuffer, sizeof(sBuffer), "%s\nMove position along the axes.\n \nGo back to save changes!", sBuffer);
 	SetMenuTitle(hMenu, sBuffer);
+	
+	Format(sBuffer, sizeof(sBuffer), "Stepsize: %.0f\n \n", g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
+	AddMenuItem(hMenu, "togglestepsize", sBuffer);
 
 	AddMenuItem(hMenu, "ax", "Add to X axis (red)");
 	AddMenuItem(hMenu, "sx", "Subtract from X axis");
 	AddMenuItem(hMenu, "ay", "Add to Y axis (green)");
 	AddMenuItem(hMenu, "sy", "Subtract from Y axis");
 	AddMenuItem(hMenu, "az", "Add to Z axis (blue)");
-	AddMenuItem(hMenu, "sz", "Subtract from Z axis");
+	AddMenuItem(hMenu, "sz", "Subtract from Z axis\n \n");
+	
+	// Simulate our own back button..
+	Format(sBuffer, sizeof(sBuffer), "%T", "Back", client);
+	AddMenuItem(hMenu, "back", sBuffer);
 	
 	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
 }
@@ -2828,6 +2836,20 @@ public Menu_HandlePointAxisEdit(Handle:menu, MenuAction:action, param1, param2)
 	{
 		new String:sInfo[32];
 		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		
+		if(StrEqual(sInfo, "togglestepsize"))
+		{
+			g_ClientMenuState[param1][CMS_stepSizeIndex] = (g_ClientMenuState[param1][CMS_stepSizeIndex] + 1) % sizeof(g_fStepsizes);
+			DisplayPointAxisModificationMenu(param1);
+			return;
+		}
+		
+		if(StrEqual(sInfo, "back"))
+		{
+			g_ClientMenuState[param1][CMS_disablePreview] = false;
+			DisplayZonePointEditMenu(param1);
+			return;
+		}
 		
 		new group[ZoneGroup], zoneData[ZoneData];
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
