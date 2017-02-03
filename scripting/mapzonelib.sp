@@ -103,6 +103,7 @@ enum ClientClipBoard {
 }
 
 new Handle:g_hCVShowZonesDefault;
+new Handle:g_hCVOptimizeBeams;
 new Handle:g_hCVDebugBeamDistance;
 new Handle:g_hCVMinHeight;
 new Handle:g_hCVDefaultHeight;
@@ -168,9 +169,12 @@ public OnPluginStart()
 	LoadTranslations("common.phrases");
 	
 	g_hCVShowZonesDefault = CreateConVar("sm_mapzone_showzones", "0", "Show all zones to all players by default?", _, true, 0.0, true, 1.0);
+	g_hCVOptimizeBeams = CreateConVar("sm_mapzone_optimize_beams", "1", "Try to hide zones from players, that aren't able to see them?", _, true, 0.0, true, 1.0);
 	g_hCVDebugBeamDistance = CreateConVar("sm_mapzone_debug_beamdistance", "5000", "Only show zones that are as close as up to x units to the player.", _, true, 0.0);
 	g_hCVMinHeight = CreateConVar("sm_mapzone_minheight", "10", "Snap to the default_height if zone is below this height.", _, true, 0.0);
 	g_hCVDefaultHeight = CreateConVar("sm_mapzone_default_height", "128", "The default height of a zone when it's below the minimum height. 0 to disable.", _, true, 0.0);
+	
+	AutoExecConfig(true, "plugin.mapzonelib");
 	
 	HookConVarChange(g_hCVShowZonesDefault, ConVar_OnDebugChanged);
 	
@@ -1228,6 +1232,8 @@ public Action:Timer_ShowZones(Handle:timer)
 	new iClients[MaxClients], iNumClients;
 	new iDefaultColor[4], iColor[4];
 	
+	new bool:bOptimizeBeams = GetConVarBool(g_hCVOptimizeBeams);
+	
 	new Float:vFirstPoint[3], Float:vSecondPoint[3];
 	new Float:fClientAngles[3], Float:fClientEyePosition[3], Float:fClientToZonePoint[3], Float:fLength;
 	for(new i=0;i<iNumGroups;i++)
@@ -1269,10 +1275,13 @@ public Action:Timer_ShowZones(Handle:timer)
 			}
 			
 			// Get the world coordinates of the corners to check if players could see them.
-			Math_RotateVector(fMins, fAngles, vFirstPoint);
-			AddVectors(vFirstPoint, fPos, vFirstPoint);
-			Math_RotateVector(fMaxs, fAngles, vSecondPoint);
-			AddVectors(vSecondPoint, fPos, vSecondPoint);
+			if(bOptimizeBeams)
+			{
+				Math_RotateVector(fMins, fAngles, vFirstPoint);
+				AddVectors(vFirstPoint, fPos, vFirstPoint);
+				Math_RotateVector(fMaxs, fAngles, vSecondPoint);
+				AddVectors(vSecondPoint, fPos, vSecondPoint);
+			}
 			
 			iNumClients = 0;
 			for(new c=1;c<=MaxClients;c++)
@@ -1284,34 +1293,37 @@ public Action:Timer_ShowZones(Handle:timer)
 					continue;
 				
 				// Could the player see the zone?
-				GetClientEyeAngles(c, fClientAngles);
-				GetAngleVectors(fClientAngles, fClientAngles, NULL_VECTOR, NULL_VECTOR);
-				NormalizeVector(fClientAngles, fClientAngles);
-				GetClientEyePosition(c, fClientEyePosition);
-				
-				// TODO: Consider player FOV!
-				// See if the first corner of the zone is in front of the player and near enough.
-				MakeVectorFromPoints(fClientEyePosition, vFirstPoint, fClientToZonePoint);
-				fLength = FloatAbs(GetVectorLength(fClientToZonePoint));
-				NormalizeVector(fClientToZonePoint, fClientToZonePoint);
-				if(GetVectorDotProduct(fClientAngles, fClientToZonePoint) < 0 || fLength > fDistanceLimit)
+				if(bOptimizeBeams)
 				{
-					// First corner is behind the player or too far away..
-					// See if the second corner is in front of the player.
-					MakeVectorFromPoints(fClientEyePosition, vSecondPoint, fClientToZonePoint);
+					GetClientEyeAngles(c, fClientAngles);
+					GetAngleVectors(fClientAngles, fClientAngles, NULL_VECTOR, NULL_VECTOR);
+					NormalizeVector(fClientAngles, fClientAngles);
+					GetClientEyePosition(c, fClientEyePosition);
+					
+					// TODO: Consider player FOV!
+					// See if the first corner of the zone is in front of the player and near enough.
+					MakeVectorFromPoints(fClientEyePosition, vFirstPoint, fClientToZonePoint);
 					fLength = FloatAbs(GetVectorLength(fClientToZonePoint));
 					NormalizeVector(fClientToZonePoint, fClientToZonePoint);
 					if(GetVectorDotProduct(fClientAngles, fClientToZonePoint) < 0 || fLength > fDistanceLimit)
 					{
-						// Second corner is behind the player or too far away..
-						// See if the center is in front of the player.
-						MakeVectorFromPoints(fClientEyePosition, fPos, fClientToZonePoint);
+						// First corner is behind the player or too far away..
+						// See if the second corner is in front of the player.
+						MakeVectorFromPoints(fClientEyePosition, vSecondPoint, fClientToZonePoint);
 						fLength = FloatAbs(GetVectorLength(fClientToZonePoint));
 						NormalizeVector(fClientToZonePoint, fClientToZonePoint);
 						if(GetVectorDotProduct(fClientAngles, fClientToZonePoint) < 0 || fLength > fDistanceLimit)
 						{
-							// The zone is completely behind the player. Don't send it to him.
-							continue;
+							// Second corner is behind the player or too far away..
+							// See if the center is in front of the player.
+							MakeVectorFromPoints(fClientEyePosition, fPos, fClientToZonePoint);
+							fLength = FloatAbs(GetVectorLength(fClientToZonePoint));
+							NormalizeVector(fClientToZonePoint, fClientToZonePoint);
+							if(GetVectorDotProduct(fClientAngles, fClientToZonePoint) < 0 || fLength > fDistanceLimit)
+							{
+								// The zone is completely behind the player. Don't send it to him.
+								continue;
+							}
 						}
 					}
 				}
