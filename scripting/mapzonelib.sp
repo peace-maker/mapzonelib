@@ -57,7 +57,6 @@ enum ZoneEditState {
 }
 
 enum ZonePreviewMode {
-	ZPM_disabled,
 	ZPM_aim,
 	ZPM_feet
 }
@@ -84,6 +83,7 @@ enum ClientMenuState {
 	bool:CMS_editPosition,
 	ZoneEditState:CMS_editState,
 	ZonePreviewMode:CMS_previewMode,
+	bool:CMS_disablePreview, // Used to not show a preview while in the axes modification menu.
 	CMS_stepSizeIndex, // index into g_fStepsizes array currently used by the client.
 	Float:CMS_aimCapDistance, // How far away can the aim target wall be at max?
 	bool:CMS_redrawPointMenu, // Player is currently changing the cap distance using right click?
@@ -274,6 +274,7 @@ public OnClientDisconnect(client)
 	g_ClientMenuState[client][CMS_editCenter] = false;
 	g_ClientMenuState[client][CMS_editPosition] = false;
 	g_ClientMenuState[client][CMS_previewMode] = ZPM_aim;
+	g_ClientMenuState[client][CMS_disablePreview] = false;
 	g_ClientMenuState[client][CMS_stepSizeIndex] = DEFAULT_STEPSIZE_INDEX;
 	g_ClientMenuState[client][CMS_aimCapDistance] = -1.0;
 	g_ClientMenuState[client][CMS_redrawPointMenu] = false;
@@ -1434,21 +1435,21 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 		return Plugin_Continue;
 	}
 	
+	// Don't show anything when preview is disabled.
+	if(g_ClientMenuState[client][CMS_disablePreview])
+		return Plugin_Continue;
+	
 	// Get the client's aim position.
 	new Float:fAimPosition[3], Float:fUnsnappedAimPosition[3];
 	if (!GetClientZoneAimPosition(client, fAimPosition, fUnsnappedAimPosition))
 		return Plugin_Continue;
 	
-	// Show an indicator on where the client aims at if not preview the feet position.
-	if (g_ClientMenuState[client][CMS_previewMode] != ZPM_feet)
+	// Show an indicator on where the client aims at.
+	if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
 	{
 		TE_SetupGlowSprite(fAimPosition, g_iGlowSprite, 0.1, 0.1, 150);
 		TE_SendToClient(client);
 	}
-	
-	// Don't show anything when preview is disabled.
-	if(g_ClientMenuState[client][CMS_previewMode] == ZPM_disabled)
-		return Plugin_Continue;
 	
 	// Get the snapped and unsnapped target positions now.
 	// Unsnapped, so we can draw a line between the points to show the user where it'll snap to.
@@ -2642,8 +2643,6 @@ DisplayZonePointEditMenu(client)
 	new String:sBuffer[256] = "Show preview: ";
 	switch (g_ClientMenuState[client][CMS_previewMode])
 	{
-		case ZPM_disabled:
-			StrCat(sBuffer, sizeof(sBuffer), "Disabled");
 		case ZPM_aim:
 			StrCat(sBuffer, sizeof(sBuffer), "Aim");
 		case ZPM_feet:
@@ -2738,7 +2737,7 @@ public Menu_HandleZonePointEdit(Handle:menu, MenuAction:action, param1, param2)
 		if(StrEqual(sInfo, "axismenu"))
 		{
 			// Don't show the zone preview anymore, so the user doesn't get distracted.
-			g_ClientMenuState[param1][CMS_previewMode] = ZPM_disabled;
+			g_ClientMenuState[param1][CMS_disablePreview] = true;
 			DisplayPointAxisModificationMenu(param1);
 			return;
 		}
@@ -2748,7 +2747,7 @@ public Menu_HandleZonePointEdit(Handle:menu, MenuAction:action, param1, param2)
 		{
 			g_ClientMenuState[param1][CMS_previewMode]++;
 			if(g_ClientMenuState[param1][CMS_previewMode] >= ZonePreviewMode)
-				g_ClientMenuState[param1][CMS_previewMode] = ZPM_disabled;
+				g_ClientMenuState[param1][CMS_previewMode] = ZPM_aim;
 		}
 		// Toggle through all the different step sizes.
 		else if(StrEqual(sInfo, "togglestepsize"))
@@ -2866,6 +2865,7 @@ public Menu_HandlePointAxisEdit(Handle:menu, MenuAction:action, param1, param2)
 	}
 	else if(action == MenuAction_Cancel)
 	{
+		g_ClientMenuState[param1][CMS_disablePreview] = false;
 		if(param2 == MenuCancel_ExitBack)
 		{
 			DisplayZonePointEditMenu(param1);
