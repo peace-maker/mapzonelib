@@ -66,6 +66,12 @@ enum ZonePreviewMode {
 #define DEFAULT_STEPSIZE_INDEX 3
 new Float:g_fStepsizes[] = {1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0};
 
+enum GridSnapMode {
+	GSM_disabled,
+	GSM_snapXY,
+	GSM_snapXYZ
+}
+
 enum ClientMenuState {
 	CMS_group,
 	CMS_cluster,
@@ -81,6 +87,7 @@ enum ClientMenuState {
 	CMS_stepSizeIndex, // index into g_fStepsizes array currently used by the client.
 	Float:CMS_aimCapDistance, // How far away can the aim target wall be at max?
 	bool:CMS_redrawPointMenu, // Player is currently changing the cap distance using right click?
+	GridSnapMode:CMS_snapToGrid, // Snap to the nearest grid corner when assuming a grid size of CMS_stepSizeIndex.
 	Float:CMS_first[3],
 	Float:CMS_second[3],
 	Float:CMS_rotation[3],
@@ -266,6 +273,7 @@ public OnClientDisconnect(client)
 	g_ClientMenuState[client][CMS_stepSizeIndex] = DEFAULT_STEPSIZE_INDEX;
 	g_ClientMenuState[client][CMS_aimCapDistance] = -1.0;
 	g_ClientMenuState[client][CMS_redrawPointMenu] = false;
+	g_ClientMenuState[client][CMS_snapToGrid] = GSM_disabled;
 	Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
 	Array_Fill(g_ClientMenuState[client][CMS_center], 3, 0.0);
 	ResetZoneAddingState(client);
@@ -508,6 +516,9 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 		{
 			new Float:fOrigin[3];
 			GetClientAbsOrigin(client, fOrigin);
+			
+			// Snap the position to the grid if user wants it.
+			SnapToGrid(client, fOrigin);
 			
 			HandleZonePositionSetting(client, fOrigin);
 		}
@@ -1437,6 +1448,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 			else
 			{
 				GetClientAbsOrigin(client, fCenter);
+				SnapToGrid(client, fCenter);
 			}
 			Array_Copy(zoneData[ZD_rotation], fRotation, 3);
 			Array_Copy(zoneData[ZD_mins], fMins, 3);
@@ -1459,6 +1471,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 			else
 			{
 				GetClientAbsOrigin(client, fFirstPoint);
+				SnapToGrid(client, fFirstPoint);
 			}
 			Array_Copy(g_ClientMenuState[client][CMS_second], fSecondPoint, 3);
 			HandleZoneDefaultHeight(fFirstPoint[2], fSecondPoint[2]);
@@ -1475,6 +1488,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 			else
 			{
 				GetClientAbsOrigin(client, fSecondPoint);
+				SnapToGrid(client, fSecondPoint);
 			}
 			HandleZoneDefaultHeight(fFirstPoint[2], fSecondPoint[2]);
 		}
@@ -2535,7 +2549,7 @@ public Panel_HandleConfirmDeleteZone(Handle:menu, MenuAction:action, param1, par
 			if(g_ClientMenuState[param1][CMS_cluster] == -1)
 			{
 				LogAction(param1, -1, "%L deleted zone \"%s\" of group \"%s\".", param1, zoneData[ZD_name], group[ZG_name]);
-				DisplayGroupRootMenu(param1, group);
+				DisplayZoneListMenu(param1);
 			}
 			else
 			{
@@ -2626,6 +2640,17 @@ DisplayZonePointEditMenu(client)
 		AddMenuItem(hMenu, "resetaimdistance", sBuffer);
 	}
 	
+	switch(g_ClientMenuState[client][CMS_snapToGrid])
+	{
+		case GSM_disabled:
+			Format(sBuffer, sizeof(sBuffer), "Snap to map grid: Disabled");
+		case GSM_snapXY:
+			Format(sBuffer, sizeof(sBuffer), "Snap to map grid: Enabled (no vertical snapping)");
+		case GSM_snapXYZ:
+			Format(sBuffer, sizeof(sBuffer), "Snap to map grid: Enabled (WITH vertical snapping)");
+	}
+	AddMenuItem(hMenu, "togglegridsnap", sBuffer);
+	
 	if(!g_ClientMenuState[client][CMS_addZone])
 		AddMenuItem(hMenu, "axismenu", "Move point on axes through menu");
 	
@@ -2704,6 +2729,11 @@ public Menu_HandleZonePointEdit(Handle:menu, MenuAction:action, param1, param2)
 		else if(StrEqual(sInfo, "resetaimdistance"))
 		{
 			g_ClientMenuState[param1][CMS_aimCapDistance] = -1.0;
+		}
+		else if(StrEqual(sInfo, "togglegridsnap"))
+		{
+			g_ClientMenuState[param1][CMS_snapToGrid]++;
+			g_ClientMenuState[param1][CMS_snapToGrid] %= GridSnapMode;
 		}
 		
 		DisplayZonePointEditMenu(param1);
@@ -3806,6 +3836,10 @@ bool:GetClientZoneAimPosition(client, Float:fTarget[3])
 	if (bDidHit)
 	{
 		TR_GetEndPosition(fTarget);
+		
+		// Snap the point to the grid, if the user wants it.
+		SnapToGrid(client, fTarget);
+		
 		MakeVectorFromPoints(fClientPosition, fTarget, fAimDirection);
 		
 		// Player is aiming at something that's nearer than the current maximal distance?
@@ -3828,13 +3862,32 @@ bool:GetClientZoneAimPosition(client, Float:fTarget[3])
 		return bDidHit;
 	
 	// The traced point is further away than our limit.
-	// Move the aimCapDistance into the direction where the player is looking.
+	// Move |aimCapDistance| into the direction where the player is looking.
 	GetAngleVectors(fClientAngles, fAimDirection, NULL_VECTOR, NULL_VECTOR);
 	NormalizeVector(fAimDirection, fAimDirection);
 	ScaleVector(fAimDirection, g_ClientMenuState[client][CMS_aimCapDistance]);
 	AddVectors(fClientPosition, fAimDirection, fTarget);
 	
+	SnapToGrid(client, fTarget);
+	
 	return true;
+}
+
+SnapToGrid(client, Float:fPoint[3])
+{
+	// User has this disabled.
+	if(g_ClientMenuState[client][CMS_snapToGrid] == GSM_disabled)
+		return;
+		
+	int iSnapDimensions = 2;
+	if(g_ClientMenuState[client][CMS_snapToGrid] == GSM_snapXYZ)
+		iSnapDimensions = 3;
+	
+	new Float:fStepsize = g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]];
+	for(new i=0; i<iSnapDimensions; i++)
+	{
+		fPoint[i] = RoundToNearest(fPoint[i] / fStepsize) * fStepsize;
+	}
 }
 
 // Handle the default height of a zone when it's too flat.
