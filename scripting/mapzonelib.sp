@@ -11,10 +11,12 @@
 
 enum ZoneData {
 	ZD_index,
+	ZD_databaseId,
 	ZD_triggerEntity,
 	ZD_clusterIndex,
 	ZD_teamFilter,
 	ZD_color[4],
+	bool:ZD_customKVChanged, // Remember when the custom keyvalues were changed, so we sync the database.
 	Handle:ZD_customKV,
 	Float:ZD_position[3],
 	Float:ZD_mins[3],
@@ -29,9 +31,11 @@ enum ZoneData {
 
 enum ZoneCluster {
 	ZC_index,
+	ZC_databaseId,
 	bool:ZC_deleted,
 	ZC_teamFilter,
 	ZC_color[4],
+	bool:ZC_customKVChanged, // Remember when the custom keyvalues were changed, so we sync the database.
 	Handle:ZC_customKV,
 	bool:ZC_adminShowZones[MAXPLAYERS+1],  // Just to remember if we want to toggle all zones in this cluster on or off.
 	ZC_clientInZones[MAXPLAYERS+1], // Save for each player in how many zones of this cluster he is.
@@ -102,6 +106,9 @@ new Handle:g_hCVDebugBeamDistance;
 new Handle:g_hCVMinHeight;
 new Handle:g_hCVDefaultHeight;
 
+new Handle:g_hCVDatabaseConfig;
+new Handle:g_hCVTablePrefix;
+
 new Handle:g_hfwdOnEnterForward;
 new Handle:g_hfwdOnLeaveForward;
 
@@ -113,6 +120,14 @@ new g_iGlowSprite = -1;
 
 // Central array to save all information about zones
 new Handle:g_hZoneGroups;
+
+// Optional database connection
+new Handle:g_hDatabase;
+new String:g_sTablePrefix[64];
+new String:g_sCurrentMap[128];
+new bool:g_bConnectingToDatabase;
+// Used to discard old requests when changing the map fast.
+new g_iDatabaseSequence;
 
 // Support for browsing through nested menus
 new g_ClientMenuState[MAXPLAYERS+1][ClientMenuState];
@@ -167,6 +182,8 @@ public OnPluginStart()
 	g_hCVDebugBeamDistance = CreateConVar("sm_mapzone_debug_beamdistance", "5000", "Only show zones that are as close as up to x units to the player.", _, true, 0.0);
 	g_hCVMinHeight = CreateConVar("sm_mapzone_minheight", "10", "Snap to the default_height if zone is below this height.", _, true, 0.0);
 	g_hCVDefaultHeight = CreateConVar("sm_mapzone_default_height", "128", "The default height of a zone when it's below the minimum height. 0 to disable.", _, true, 0.0);
+	g_hCVDatabaseConfig = CreateConVar("sm_mapzone_database_config", "", "The database section in databases.cfg to connect to. Optionally save and load zones from that database. Only used when this option is set. Will still save the zones to local files too as backup if database is unavailable.");
+	g_hCVTablePrefix = CreateConVar("sm_mapzone_database_prefix", "zones_", "Optional prefix of the database tables. e.g. \"zone_\"");
 	
 	AutoExecConfig(true, "plugin.mapzonelib");
 	
@@ -190,7 +207,7 @@ public OnPluginEnd()
 	if (!GetCurrentMap(sMap, sizeof(sMap)))
 		return;
 	
-	SaveAllZoneGroupsToFile();
+	SaveAllZoneGroups();
 	
 	// Kill all created trigger_multiple.
 	new iNumGroups = GetArraySize(g_hZoneGroups);
@@ -210,6 +227,39 @@ public OnPluginEnd()
 /**
  * Core forward callbacks
  */
+public OnConfigsExecuted()
+{
+	new String:sDatabase[256];
+	GetConVarString(g_hCVDatabaseConfig, sDatabase, sizeof(sDatabase));
+	GetConVarString(g_hCVTablePrefix, g_sTablePrefix, sizeof(g_sTablePrefix));
+	
+	// Remove all zones of the old map
+	ClearZonesInGroups();
+	
+	// Storing zones in a database is optional. Nothing to do here when the option is not set.
+	if (!sDatabase[0])
+	{
+		// Load the zones from the config files.
+		LoadAllGroupZones();
+		// Spawn the trigger_multiples for all zones
+		SetupAllGroupZones();
+		return;
+	}
+	
+	// Load all zones for the current map for all registered groups
+	if (g_hDatabase)
+	{
+		 // Use sequence number in queries to discard late results when changing map quickly.
+		LoadAllGroupZonesFromDatabase(++g_iDatabaseSequence);
+	}
+	// Not already in the process of connecting.
+	else if (!g_bConnectingToDatabase)
+	{
+		g_bConnectingToDatabase = true;
+		SQL_TConnect(SQL_OnConnect, sDatabase);
+	}
+}
+
 public OnMapStart()
 {
 	PrecacheModel("models/error.mdl", true);
@@ -222,6 +272,8 @@ public OnMapStart()
 		SetFailState("Unable to load game config funcommands.games from stock sourcemod plugin for beam materials.");
 		return;
 	}
+	
+	GetCurrentMap(g_sCurrentMap, sizeof(g_sCurrentMap));
 	
 	new String:sBuffer[PLATFORM_MAX_PATH];
 	if (GameConfGetKeyValue(hGameConfig, "SpriteBeam", sBuffer, sizeof(sBuffer)) && sBuffer[0])
@@ -243,17 +295,13 @@ public OnMapStart()
 	
 	// Remove all zones of the old map
 	ClearZonesInGroups();
-	// Load all zones for the current map for all registered groups
-	LoadAllGroupZones();
-	// Spawn the trigger_multiples for all zones
-	SetupAllGroupZones();
 	
 	g_hShowZonesTimer = CreateTimer(2.0, Timer_ShowZones, _, TIMER_FLAG_NO_MAPCHANGE|TIMER_REPEAT);
 }
 
 public OnMapEnd()
 {
-	SaveAllZoneGroupsToFile();
+	SaveAllZoneGroups();
 	g_hShowZonesTimer = INVALID_HANDLE;
 }
 
@@ -738,7 +786,12 @@ public Native_RegisterZoneGroup(Handle:plugin, numParams)
 	group[ZG_defaultColor][3] = 255;
 	
 	// Load the zone details
-	LoadZoneGroup(group);
+	if (g_hDatabase)
+		LoadZoneGroupFromDatabase(group, g_iDatabaseSequence);
+	// If we're in the process of connecting to the database, don't do anything now.
+	// The zones for this group will be loaded once the database connected.
+	else if (!g_bConnectingToDatabase)
+		LoadZoneGroup(group);
 	
 	group[ZG_index] = GetArraySize(g_hZoneGroups);
 	PushArrayArray(g_hZoneGroups, group[0], _:ZoneGroup);
@@ -1073,20 +1126,20 @@ public Native_SetCustomString(Handle:plugin, numParams)
 	if (GetZoneClusterByName(sZoneName, group, zoneCluster))
 	{
 		if (!zoneCluster[ZC_customKV])
-		{
 			zoneCluster[ZC_customKV] = CreateTrie();
-			SaveCluster(group, zoneCluster);
-		}
+		
 		hCustomKV = zoneCluster[ZC_customKV];
+		zoneCluster[ZC_customKVChanged] = true;
+		SaveCluster(group, zoneCluster);
 	}
 	else if (GetZoneByName(sZoneName, group, zoneData))
 	{
 		if (!zoneData[ZD_customKV])
-		{
 			zoneData[ZD_customKV] = CreateTrie();
-			SaveZone(group, zoneData);
-		}
+		
 		hCustomKV = zoneData[ZD_customKV];
+		zoneData[ZD_customKVChanged] = true;
+		SaveZone(group, zoneData);
 	}
 	
 	// No zone/cluster with this name
@@ -2120,6 +2173,8 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 		GetZoneClusterByIndex(g_ClientMenuState[param1][CMS_cluster], group, zoneCluster);
 		
+		new bool:bDeleteZones = param2 == 1;
+		
 		// We can't really delete it, because the array indicies would shift. Just don't save it to file and skip it.
 		zoneCluster[ZC_deleted] = true;
 		SaveCluster(group, zoneCluster);
@@ -2140,7 +2195,7 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 				continue;
 			
 			// Want to delete the zones in the cluster too?
-			if(param2 == 1)
+			if(bDeleteZones)
 			{
 				RemoveZoneTrigger(group, zoneData);
 				zoneData[ZD_deleted] = true;
@@ -2157,7 +2212,7 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 		g_ClientMenuState[param1][CMS_cluster] = -1;
 		DisplayClusterListMenu(param1);
 		
-		if(param2 == 1)
+		if(bDeleteZones)
 			LogAction(param1, -1, "%L deleted cluster \"%s\" and %d contained zones from group \"%s\".", param1, zoneCluster[ZC_name], iZonesCount, group[ZG_name]);
 		else
 			LogAction(param1, -1, "%L deleted cluster \"%s\" from group \"%s\", but kept %d contained zones.", param1, zoneCluster[ZC_name], group[ZG_name], iZonesCount);
@@ -3074,11 +3129,21 @@ public Menu_HandleAddFinalization(Handle:menu, MenuAction:action, param1, param2
 /**
  * Zone information persistence in configs
  */
+LoadAllGroupZones()
+{
+	new group[ZoneGroup];
+	new iSize = GetArraySize(g_hZoneGroups);
+	for(new i=0;i<iSize;i++)
+	{
+		GetGroupByIndex(i, group);
+		LoadZoneGroup(group);
+	}
+}
+
 bool:LoadZoneGroup(group[ZoneGroup])
 {
-	decl String:sPath[PLATFORM_MAX_PATH], String:sMap[128];
-	GetCurrentMap(sMap, sizeof(sMap));
-	BuildPath(Path_SM, sPath, sizeof(sPath), "configs/mapzonelib/%s/%s.zones", group[ZG_name], sMap);
+	decl String:sPath[PLATFORM_MAX_PATH];
+	BuildPath(Path_SM, sPath, sizeof(sPath), "configs/mapzonelib/%s/%s.zones", group[ZG_name], g_sCurrentMap);
 	
 	if(!FileExists(sPath))
 		return false;
@@ -3212,11 +3277,29 @@ ParseCustomKeyValues(Handle:hKV, Handle:hCustomKV)
 	} while (KvGotoNextKey(hKV, false));
 }
 
+// Save the zones to the config files and optionally to the database too.
+SaveAllZoneGroups()
+{
+	SaveAllZoneGroupsToFile();
+	if (g_hDatabase)
+		SaveAllZoneGroupsToDatabase();
+}
+
+SaveAllZoneGroupsToFile()
+{
+	new group[ZoneGroup];
+	new iSize = GetArraySize(g_hZoneGroups);
+	for(new i=0;i<iSize;i++)
+	{
+		GetGroupByIndex(i, group);
+		if(!SaveZoneGroupToFile(group))
+			LogError("Error creating \"configs/mapzonelib/%s/\" folder. Didn't save any zones in that group.", group[ZG_name]);
+	}
+}
+
 bool:SaveZoneGroupToFile(group[ZoneGroup])
 {
-	decl String:sPath[PLATFORM_MAX_PATH], String:sMap[128];
-	GetCurrentMap(sMap, sizeof(sMap));
-	
+	decl String:sPath[PLATFORM_MAX_PATH];
 	new iMode = FPERM_U_READ|FPERM_U_WRITE|FPERM_U_EXEC|FPERM_G_READ|FPERM_G_WRITE|FPERM_G_EXEC|FPERM_O_READ|FPERM_O_EXEC;
 	// Have mercy and even create the root config file directory.
 	BuildPath(Path_SM, sPath, sizeof(sPath),  "configs/mapzonelib");
@@ -3269,7 +3352,7 @@ bool:SaveZoneGroupToFile(group[ZoneGroup])
 	}
 	
 	KvRewind(hKV);
-	BuildPath(Path_SM, sPath, sizeof(sPath), "configs/mapzonelib/%s/%s.zones", group[ZG_name], sMap);
+	BuildPath(Path_SM, sPath, sizeof(sPath), "configs/mapzonelib/%s/%s.zones", group[ZG_name], g_sCurrentMap);
 	// Only add zones, if there are any for this map.
 	if(bZonesAdded)
 	{
@@ -3350,27 +3433,567 @@ AddCustomKeyValues(Handle:hKV, Handle:hCustomKV)
 	KvGoBack(hKV);
 }
 
-SaveAllZoneGroupsToFile()
+/**
+ * SQL zone handling
+ * This is optional and only active when setting the sm_mapzone_database_config convar.
+ */
+public SQL_OnConnect(Handle:owner, Handle:hndl, const String:error[], any:data)
+{
+	if (!hndl)
+	{
+		LogError("Error connecting to database: %s", error);
+		g_bConnectingToDatabase = false;
+		// Load the zones from the config files.
+		LoadAllGroupZones();
+		// Spawn the trigger_multiples for all zones
+		SetupAllGroupZones();
+		return;
+	}
+	
+	g_hDatabase = hndl;
+	
+	// Check if there are our tables in the database already.
+	new String:sQuery[1024];
+	Format(sQuery, sizeof(sQuery), "SELECT COUNT(*) FROM `%sclusters`", g_sTablePrefix);
+	SQL_TQuery(g_hDatabase, SQL_CheckTables, sQuery);
+}
+
+public SQL_CheckTables(Handle:owner, Handle:hndl, const String:error[], any:data)
+{
+	// Tables exists.
+	if (hndl)
+	{
+		LoadAllGroupZonesFromDatabase(++g_iDatabaseSequence);
+		return;
+	}
+	
+	new String:sQuery[1024];
+	new Transaction:hTransaction = SQL_CreateTransaction();
+	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%sclusters` (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, CONSTRAINT cluster_in_group UNIQUE (groupname, map, name))", g_sTablePrefix);
+	SQL_AddQuery(hTransaction, sQuery);
+	
+	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%szones` (id INT NOT NULL AUTO_INCREMENT, cluster_id INT NULL, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, pos_x FLOAT NOT NULL, pos_y FLOAT NOT NULL, pos_z FLOAT NOT NULL, min_x FLOAT NOT NULL, min_y FLOAT NOT NULL, min_z FLOAT NOT NULL, max_x FLOAT NOT NULL, max_y FLOAT NOT NULL, max_z FLOAT NOT NULL, rotation_x FLOAT NOT NULL, rotation_y FLOAT NOT NULL, rotation_z FLOAT NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, PRIMARY KEY (id), FOREIGN KEY (cluster_id) REFERENCES `%sclusters`(id) ON DELETE CASCADE, CONSTRAINT zone_in_group UNIQUE (groupname, map, name))", g_sTablePrefix, g_sTablePrefix);
+	SQL_AddQuery(hTransaction, sQuery);
+	
+	Format(sQuery, sizeof(sQuery), "CREATE FULLTEXT INDEX mapgroup on `%szones` (groupname, map)", g_sTablePrefix);
+	SQL_AddQuery(hTransaction, sQuery);
+	
+	Format(sQuery, sizeof(sQuery), "CREATE FULLTEXT INDEX mapgroup on `%sclusters` (groupname, map)", g_sTablePrefix);
+	SQL_AddQuery(hTransaction, sQuery);
+	
+	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%scustom_zone_keyvalues` (zone_id INT NOT NULL, setting VARCHAR(128) NOT NULL, val VARCHAR(256) NOT NULL, PRIMARY KEY (zone_id, setting), FOREIGN KEY (zone_id) REFERENCES `%szones`(id) ON DELETE CASCADE)", g_sTablePrefix, g_sTablePrefix);
+	SQL_AddQuery(hTransaction, sQuery);
+	
+	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%scustom_cluster_keyvalues` (cluster_id INT NOT NULL, setting VARCHAR(128) NOT NULL, val VARCHAR(256) NOT NULL, PRIMARY KEY (cluster_id, setting), FOREIGN KEY (cluster_id) REFERENCES `%sclusters`(id) ON DELETE CASCADE)", g_sTablePrefix, g_sTablePrefix);
+	SQL_AddQuery(hTransaction, sQuery);
+	
+	SQL_ExecuteTransaction(g_hDatabase, hTransaction, SQLTxn_CreateTablesSuccess, SQLTxn_CreateTablesFailure);
+}
+
+public SQLTxn_CreateTablesSuccess(Handle:db, any:data, numQueries, Handle:results[], any:queryData[])
+{
+	// Nothing to load here :)
+}
+
+public SQLTxn_CreateTablesFailure(Handle:db, any:data, numQueries, const String:error[], failIndex, any:queryData[])
+{
+	LogError("Error creating database tables (%d/%d). Falling back to local config files. Error: %s", failIndex, numQueries, error);
+	// Cannot use this database..
+	if (db)
+		CloseHandle(db);
+	g_hDatabase = INVALID_HANDLE;
+	
+	// Remove all zones.
+	ClearZonesInGroups();
+	// Load the zones from the config files.
+	LoadAllGroupZones();
+	// Spawn the trigger_multiples for all zones
+	SetupAllGroupZones();
+}
+
+// Used in any error condition while loading maps from the database.
+LoadZonesFromConfigsInstead(group[ZoneGroup])
+{
+	// Remove zones of this group before that might already been loaded.
+	ClearZonesinGroup(group);
+	// Load the zones of this group.
+	LoadZoneGroup(group);
+	// Spawn the trigger_multiples for these zones
+	SetupGroupZones(group);
+}
+
+LoadAllGroupZonesFromDatabase(iSequence)
 {
 	new group[ZoneGroup];
 	new iSize = GetArraySize(g_hZoneGroups);
 	for(new i=0;i<iSize;i++)
 	{
 		GetGroupByIndex(i, group);
-		if(!SaveZoneGroupToFile(group))
-			LogError("Error creating \"configs/mapzonelib/%s/\" folder. Didn't save any zones in that group.", group[ZG_name]);
+		LoadZoneGroupFromDatabase(group, iSequence);
 	}
 }
 
-LoadAllGroupZones()
+LoadZoneGroupFromDatabase(group[ZoneGroup], iSequence)
 {
+	new String:sMapEscaped[257], String:sGroupNameEscaped[MAX_ZONE_GROUP_NAME*2+1];
+	SQL_EscapeString(g_hDatabase, g_sCurrentMap, sMapEscaped, sizeof(sMapEscaped));
+	SQL_EscapeString(g_hDatabase, group[ZG_name], sGroupNameEscaped, sizeof(sGroupNameEscaped));
+	
+	// First get all the clusters.
+	new String:sQuery[512];
+	Format(sQuery, sizeof(sQuery), "SELECT id, name, team, color FROM `%sclusters` WHERE groupname = '%s' AND map = '%s'", g_sTablePrefix, sGroupNameEscaped, sMapEscaped);
+	new Handle:hPack = CreateDataPack();
+	WritePackCell(hPack, iSequence);
+	WritePackCell(hPack, group[ZG_index]);
+	SQL_TQuery(g_hDatabase, SQL_GetClusters, sQuery, hPack);
+}
+
+public SQL_GetClusters(Handle:owner, Handle:hndl, const String:error[], any:data)
+{
+	ResetPack(data);
+	new iSequence = ReadPackCell(data);
+	new iGroupIndex = ReadPackCell(data);
+	// This is old data. Discard everything.
+	if (iSequence != g_iDatabaseSequence)
+	{
+		CloseHandle(data);
+		return;
+	}
+	
+	new group[ZoneGroup];
+	GetGroupByIndex(iGroupIndex, group);
+	
+	if (!hndl)
+	{
+		LogError("Failed to get clusters: %s", error);
+		CloseHandle(data);
+		LoadZonesFromConfigsInstead(group);
+		return;
+	}
+	
+	// SELECT id, name, team, color
+	new String:sClusterIDs[1024];
+	new zoneCluster[ZoneCluster], iColorInt;
+	while (SQL_FetchRow(hndl))
+	{
+		zoneCluster[ZC_databaseId] = SQL_FetchInt(hndl, 0);
+		SQL_FetchString(hndl, 1, zoneCluster[ZC_name], MAX_ZONE_NAME);
+		zoneCluster[ZC_teamFilter] = SQL_FetchInt(hndl, 2);
+		iColorInt = SQL_FetchInt(hndl, 3);
+		zoneCluster[ZC_color][0] = (iColorInt >> 24) & 0xff;
+		zoneCluster[ZC_color][1] = (iColorInt >> 16) & 0xff;
+		zoneCluster[ZC_color][2] = (iColorInt >> 8) & 0xff;
+		zoneCluster[ZC_color][3] = iColorInt & 0xff;
+		
+		zoneCluster[ZC_index] = GetArraySize(group[ZG_cluster]);
+		PushArrayArray(group[ZG_cluster], zoneCluster[0], _:ZoneCluster);
+		
+		// Save all loaded cluster ids so we can load the custom keyvalues for them
+		if (sClusterIDs[0])
+			Format(sClusterIDs, sizeof(sClusterIDs), "%s, %d", sClusterIDs, zoneCluster[ZC_databaseId]);
+		else
+			Format(sClusterIDs, sizeof(sClusterIDs), "%d", zoneCluster[ZC_databaseId]);
+	}
+	
+	// No clusters in this group. This will return 0 results.
+	if (!sClusterIDs[0])
+		sClusterIDs = "-1"; // FIXME Save this query and go right to the next step if there are no clusters.
+	
+	// Now load all the custom key values for these clusters.
+	new String:sQuery[2048];
+	Format(sQuery, sizeof(sQuery), "SELECT cluster_id, setting, val FROM `%scustom_cluster_keyvalues` WHERE cluster_id IN(%s)", g_sTablePrefix, sClusterIDs);
+	SQL_TQuery(g_hDatabase, SQL_GetClusterKeyValues, sQuery, data);
+}
+
+public SQL_GetClusterKeyValues(Handle:owner, Handle:hndl, const String:error[], any:data)
+{
+	ResetPack(data);
+	new iSequence = ReadPackCell(data);
+	new iGroupIndex = ReadPackCell(data);
+	// This is old data. Discard everything.
+	if (iSequence != g_iDatabaseSequence)
+	{
+		CloseHandle(data);
+		return;
+	}
+	
+	new group[ZoneGroup];
+	GetGroupByIndex(iGroupIndex, group);
+	
+	if (!hndl)
+	{
+		LogError("Failed to get cluster key values: %s", error);
+		CloseHandle(data);
+		LoadZonesFromConfigsInstead(group);
+		return;
+	}
+	
+	// SELECT cluster_id, setting, val
+	new zoneCluster[ZoneCluster], iClusterIndex;
+	new String:sKey[64], String:sValue[64];
+	while (SQL_FetchRow(hndl))
+	{
+		iClusterIndex = FindValueInArray(group[ZG_cluster], SQL_FetchInt(hndl, 0), _:ZC_databaseId);
+		if (iClusterIndex == -1)
+			continue;
+		
+		GetZoneClusterByIndex(iClusterIndex, group, zoneCluster);
+		if (!zoneCluster[ZC_customKV])
+		{
+			zoneCluster[ZC_customKV] = CreateTrie();
+			SaveCluster(group, zoneCluster);
+		}
+		
+		SQL_FetchString(hndl, 1, sKey, sizeof(sKey));
+		SQL_FetchString(hndl, 2, sValue, sizeof(sValue));
+		SetTrieString(zoneCluster[ZC_customKV], sKey, sValue);
+	}
+	
+	new String:sMapEscaped[257], String:sGroupNameEscaped[MAX_ZONE_GROUP_NAME*2+1];
+	SQL_EscapeString(g_hDatabase, g_sCurrentMap, sMapEscaped, sizeof(sMapEscaped));
+	SQL_EscapeString(g_hDatabase, group[ZG_name], sGroupNameEscaped, sizeof(sGroupNameEscaped));
+	
+	// Now get all the zones in that group.
+	new String:sQuery[1024];
+	Format(sQuery, sizeof(sQuery), "SELECT id, cluster_id, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color FROM `%szones` WHERE groupname = '%s' AND map = '%s'", g_sTablePrefix, sGroupNameEscaped, sMapEscaped);
+	SQL_TQuery(g_hDatabase, SQL_GetZones, sQuery, data);
+}
+
+public SQL_GetZones(Handle:owner, Handle:hndl, const String:error[], any:data)
+{
+	ResetPack(data);
+	new iSequence = ReadPackCell(data);
+	new iGroupIndex = ReadPackCell(data);
+	// This is old data. Discard everything.
+	if (iSequence != g_iDatabaseSequence)
+	{
+		CloseHandle(data);
+		return;
+	}
+	
+	new group[ZoneGroup];
+	GetGroupByIndex(iGroupIndex, group);
+	
+	if (!hndl)
+	{
+		LogError("Failed to get zones: %s", error);
+		CloseHandle(data);
+		LoadZonesFromConfigsInstead(group);
+		return;
+	}
+	
+	// SELECT id, cluster_id, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color
+	new String:sZoneIDs[1024];
+	new zoneData[ZoneData], iColorInt;
+	while (SQL_FetchRow(hndl))
+	{
+		zoneData[ZD_databaseId] = SQL_FetchInt(hndl, 0);
+		zoneData[ZD_clusterIndex] = FindValueInArray(group[ZG_cluster], SQL_FetchInt(hndl, 1), _:ZC_index);
+		SQL_FetchString(hndl, 2, zoneData[ZD_name], MAX_ZONE_NAME);
+		for (new i=0; i<3; i++)
+		{
+			zoneData[ZD_position][i] = SQL_FetchFloat(hndl, i+3);
+			zoneData[ZD_mins][i] = SQL_FetchFloat(hndl, i+6);
+			zoneData[ZD_maxs][i] = SQL_FetchFloat(hndl, i+9);
+			zoneData[ZD_rotation][i] = SQL_FetchFloat(hndl, i+12);
+		}
+		zoneData[ZD_teamFilter] = SQL_FetchInt(hndl, 15);
+		iColorInt = SQL_FetchInt(hndl, 16);
+		zoneData[ZD_color][0] = (iColorInt >> 24) & 0xff;
+		zoneData[ZD_color][1] = (iColorInt >> 16) & 0xff;
+		zoneData[ZD_color][2] = (iColorInt >> 8) & 0xff;
+		zoneData[ZD_color][3] = iColorInt & 0xff;
+		
+		zoneData[ZD_triggerEntity] = INVALID_ENT_REFERENCE;
+		zoneData[ZD_index] = GetArraySize(group[ZG_zones]);
+		PushArrayArray(group[ZG_zones], zoneData[0], _:ZoneData);
+		
+		// Save all loaded zone ids so we can load the custom keyvalues for them
+		if (sZoneIDs[0])
+			Format(sZoneIDs, sizeof(sZoneIDs), "%s, %d", sZoneIDs, zoneData[ZD_databaseId]);
+		else
+			Format(sZoneIDs, sizeof(sZoneIDs), "%d", zoneData[ZD_databaseId]);
+	}
+	
+	// No clusters in this group. This will return 0 results.
+	if (!sZoneIDs[0])
+		sZoneIDs = "-1";  // FIXME Save this query and go right to the next step if there are no zones.
+	
+	// Now load all the custom key values for these clusters.
+	new String:sQuery[2048];
+	Format(sQuery, sizeof(sQuery), "SELECT zone_id, setting, val FROM `%scustom_zone_keyvalues` WHERE zone_id IN(%s)", g_sTablePrefix, sZoneIDs);
+	SQL_TQuery(g_hDatabase, SQL_GetZoneKeyValues, sQuery, data);
+}
+
+public SQL_GetZoneKeyValues(Handle:owner, Handle:hndl, const String:error[], any:data)
+{
+	ResetPack(data);
+	new iSequence = ReadPackCell(data);
+	new iGroupIndex = ReadPackCell(data);
+	CloseHandle(data);
+	
+	// This is old data. Discard everything.
+	if (iSequence != g_iDatabaseSequence)
+	{
+		return;
+	}
+	
+	new group[ZoneGroup];
+	GetGroupByIndex(iGroupIndex, group);
+	
+	if (!hndl)
+	{
+		LogError("Failed to get zones key values: %s", error);
+		LoadZonesFromConfigsInstead(group);
+		return;
+	}
+	
+	// SELECT zone_id, setting, val
+	new zoneData[ZoneData], iZoneIndex;
+	new String:sKey[64], String:sValue[64];
+	while (SQL_FetchRow(hndl))
+	{
+		iZoneIndex = FindValueInArray(group[ZG_zones], SQL_FetchInt(hndl, 0), _:ZD_databaseId);
+		if (iZoneIndex == -1)
+			continue;
+		
+		GetZoneByIndex(iZoneIndex, group, zoneData);
+		if (!zoneData[ZD_customKV])
+		{
+			zoneData[ZD_customKV] = CreateTrie();
+			SaveZone(group, zoneData);
+		}
+		
+		SQL_FetchString(hndl, 1, sKey, sizeof(sKey));
+		SQL_FetchString(hndl, 2, sValue, sizeof(sValue));
+		SetTrieString(zoneData[ZD_customKV], sKey, sValue);
+	}
+	
+	// Spawn the trigger_multiples for all zones
+	SetupGroupZones(group);
+}
+
+public SQL_LogError(Handle:owner, Handle:hndl, const String:error[], any:data)
+{
+	if (!hndl)
+	{
+		LogError("Query failed: %s", error);
+	}
+}
+
+SaveAllZoneGroupsToDatabase()
+{
+	if (!g_hDatabase)
+		return;
+	
 	new group[ZoneGroup];
 	new iSize = GetArraySize(g_hZoneGroups);
 	for(new i=0;i<iSize;i++)
 	{
 		GetGroupByIndex(i, group);
-		LoadZoneGroup(group);
+		SaveZoneGroupToDatabase(group);
 	}
+}
+
+SaveZoneGroupToDatabase(group[ZoneGroup])
+{
+	// TODO: Optimize to only update clusters or zones that were changed during this map.
+	// So don't change the database if the server only used the zones.
+	new Transaction:hTransaction = SQL_CreateTransaction();
+	// Zones and clusters
+	new zoneData[ZoneData], zoneCluster[ZoneCluster];
+	new String:sQuery[2048], String:sEscapedGroupName[MAX_ZONE_GROUP_NAME*2+1], String:sEscapedZoneName[MAX_ZONE_NAME*2+1];
+	new iColor, String:sClusterInsert[512];
+	
+	// Custom keyvalues
+	new Handle:hTrieSnapshot;
+	new iNumTrieKeys;
+	new String:sKey[128], String:sValue[256];
+	new String:sEscapedKey[sizeof(sKey)*2+1], String:sEscapedValue[sizeof(sValue)*2+1];
+	
+	// Insert new clusters first.
+	new String:sClustersToDelete[1024];
+	SQL_EscapeString(g_hDatabase, group[ZG_name], sEscapedGroupName, sizeof(sEscapedGroupName));
+	new iNumClusters = GetArraySize(group[ZG_cluster]);
+	for(new i=0;i<iNumClusters;i++)
+	{
+		GetZoneClusterByIndex(i, group, zoneCluster);
+		// That cluster was deleted.
+		// We cannot deal with that yet, because we might need to update the containing zones first.
+		if(zoneCluster[ZC_deleted])
+		{
+			// Keep track of the deleted clusters, so we don't have to loop again when deleting them after updating zones.
+			if (zoneCluster[ZC_databaseId] > 0)
+			{
+				if (sClustersToDelete[0])
+					Format(sClustersToDelete, sizeof(sClustersToDelete), "%s, %d", sClustersToDelete, zoneCluster[ZC_databaseId]);
+				else
+					Format(sClustersToDelete, sizeof(sClustersToDelete), "%d", zoneCluster[ZC_databaseId]);
+			}
+			continue;
+		}
+		
+		SQL_EscapeString(g_hDatabase, zoneCluster[ZC_name], sEscapedZoneName, sizeof(sEscapedZoneName));
+		
+		iColor = zoneCluster[ZC_color][0] << 24;
+		iColor |= zoneCluster[ZC_color][1] << 16;
+		iColor |= zoneCluster[ZC_color][2] << 8;
+		iColor |= zoneCluster[ZC_color][3];
+		
+		// Update previous cluster.
+		if (zoneCluster[ZC_databaseId] > 0)
+		{
+			Format(sQuery, sizeof(sQuery), "UPDATE `%sclusters` SET name = '%s', team = %d, color = %d WHERE id = %d", g_sTablePrefix, sEscapedZoneName, zoneCluster[ZC_teamFilter], iColor, zoneCluster[ZC_databaseId]);
+			// Remember how to reference this cluster for the custom key values.
+			Format(sClusterInsert, sizeof(sClusterInsert), "%s", zoneCluster[ZC_databaseId]);
+		}
+		// Or insert a new one.
+		else
+		{
+			Format(sQuery, sizeof(sQuery), "INSERT INTO `%sclusters` (groupname, map, name, team, color) VALUES (%s, %s, %s, %d, %d)", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName, zoneCluster[ZC_teamFilter], iColor);
+			// This cluster isn't in the database yet, so we need to fetch the id after it got inserted for the custom keyvalues.
+			Format(sClusterInsert, sizeof(sClusterInsert), "(SELECT id FROM `%scluster` WHERE groupname = '%s' AND map = '%s' AND name = '%s')", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName);
+		}
+		SQL_AddQuery(hTransaction, sQuery);
+		
+		// Insert custom key values if there was something set.
+		if (!zoneCluster[ZC_customKVChanged] || !zoneCluster[ZC_customKV])
+			continue;
+		
+		// Have to remove all kv first
+		// This is much easier than tracking which key got deleted.
+		Format(sQuery, sizeof(sQuery), "DELETE FROM `%sscustom_cluster_keyvalues` WHERE cluster_id = %d", g_sTablePrefix, zoneCluster[ZC_databaseId]);
+		SQL_AddQuery(hTransaction, sQuery);
+		
+		hTrieSnapshot = CreateTrieSnapshot(zoneCluster[ZC_customKV]);
+		iNumTrieKeys = TrieSnapshotLength(hTrieSnapshot);
+		for (new k=0; k<iNumTrieKeys; k++)
+		{
+			GetTrieSnapshotKey(hTrieSnapshot, k, sKey, sizeof(sKey));
+			GetTrieString(zoneCluster[ZC_customKV], sKey, sValue, sizeof(sValue));
+			SQL_EscapeString(g_hDatabase, sKey, sEscapedKey, sizeof(sEscapedKey));
+			SQL_EscapeString(g_hDatabase, sValue, sEscapedValue, sizeof(sEscapedValue));
+			Format(sQuery, sizeof(sQuery), "INSERT INTO `%sscustom_cluster_keyvalues` (cluster_id, setting, val) VALUES (%s, '%s', '%s')", g_sTablePrefix, sClusterInsert, sEscapedKey, sEscapedValue);
+			SQL_AddQuery(hTransaction, sQuery);
+		}
+		CloseHandle(hTrieSnapshot);
+	}
+	// Update all clusters at once.
+	SQL_ExecuteTransaction(g_hDatabase, hTransaction, SQLTxn_InsertSuccess, SQLTxn_InsertClusterFailure);
+	
+	// Update all zones now.
+	hTransaction = SQL_CreateTransaction();
+	new iNumZones = GetArraySize(group[ZG_zones]);
+	new String:sZoneInsert[512];
+	for (new i=0; i<iNumZones; i++)
+	{
+		GetZoneByIndex(i, group, zoneData);
+		// This zone is history.
+		if (zoneData[ZD_deleted])
+		{
+			// We never had this in the database.
+			// Nevermind :)
+			if (zoneData[ZD_databaseId] <= 0)
+				continue;
+			
+			Format(sQuery, sizeof(sQuery), "DELETE FROM `%szones` WHERE id = %d", g_sTablePrefix, zoneData[ZD_databaseId]);
+			SQL_AddQuery(hTransaction, sQuery);
+			continue;
+		}
+		
+		// Does this belong to the right cluster?
+		if(zoneData[ZD_clusterIndex] != -1)
+		{
+			GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
+			
+			// We just inserted this new cluster. It isn't in the database yet.
+			if (zoneCluster[ZC_databaseId] <= 0)
+			{
+				// Find the previously inserted cluster id.
+				SQL_EscapeString(g_hDatabase, zoneCluster[ZC_name], sEscapedZoneName, sizeof(sEscapedZoneName));
+				Format(sClusterInsert, sizeof(sClusterInsert), "(SELECT id FROM `%scluster` WHERE groupname = '%s' AND map = '%s' AND name = '%s')", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName);
+			}
+			else
+			{
+				Format(sClusterInsert, sizeof(sClusterInsert), "%s", zoneCluster[ZC_databaseId]);
+			}
+		}
+		// This zone doesn't blong to any cluster.
+		else
+		{
+			sClusterInsert = "NULL";
+		}
+		
+		// Pack color into one integer.
+		iColor = zoneData[ZD_color][0] << 24;
+		iColor |= zoneData[ZD_color][1] << 16;
+		iColor |= zoneData[ZD_color][2] << 8;
+		iColor |= zoneData[ZD_color][3];
+		
+		SQL_EscapeString(g_hDatabase, zoneData[ZD_name], sEscapedZoneName, sizeof(sEscapedZoneName));
+		
+		// Update or insert the zone.
+		if (zoneData[ZD_databaseId] <= 0)
+		{
+			Format(sQuery, sizeof(sQuery), "INSERT INTO `%szones` (cluster_id, groupname, map, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color) VALUES (%s, '%s', '%s', '%s', %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %d, %d)", g_sTablePrefix, sClusterInsert, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName, XYZ(zoneData[ZD_position]), XYZ(zoneData[ZD_mins]), XYZ(zoneData[ZD_maxs]), XYZ(zoneData[ZD_rotation]), zoneData[ZD_teamFilter], iColor);
+			
+			// This zone isn't in the database yet, so we need to fetch the id after it got inserted for the custom keyvalues.
+			Format(sClusterInsert, sizeof(sClusterInsert), "(SELECT id FROM `%szones` WHERE groupname = '%s' AND map = '%s' AND name = '%s')", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName);
+		}
+		else
+		{
+			Format(sQuery, sizeof(sQuery), "UPDATE `%szones` SET cluster_id = %s, name = '%s', pos_x = %f, pos_y = %f, pos_z = %f, min_x = %f, min_y = %f, min_z = %f, max_x = %f, max_y = %f, max_z = %f, rotation_x = %f, rotation_y = %f, rotation_z = %f, team = %d, color = %d WHERE id = %d", g_sTablePrefix, sClusterInsert, sEscapedZoneName, XYZ(zoneData[ZD_position]), XYZ(zoneData[ZD_mins]), XYZ(zoneData[ZD_maxs]), XYZ(zoneData[ZD_rotation]), zoneData[ZD_teamFilter], iColor, zoneData[ZD_databaseId]);
+			
+			Format(sClusterInsert, sizeof(sClusterInsert), "%d", zoneData[ZD_databaseId]);
+		}
+		SQL_AddQuery(hTransaction, sQuery);
+		
+		// Insert custom key values if there was something set.
+		if (!zoneData[ZD_customKVChanged] || !zoneData[ZD_customKV])
+			continue;
+		
+		// Have to remove all kv first
+		// This is much easier than tracking which key got deleted.
+		// TODO: Optimize to only update changed ones.
+		Format(sQuery, sizeof(sQuery), "DELETE FROM `%sscustom_zones_keyvalues` WHERE zone_id = %d", g_sTablePrefix, zoneData[ZD_databaseId]);
+		SQL_AddQuery(hTransaction, sQuery);
+		
+		hTrieSnapshot = CreateTrieSnapshot(zoneData[ZD_customKV]);
+		iNumTrieKeys = TrieSnapshotLength(hTrieSnapshot);
+		for (new k=0; k<iNumTrieKeys; k++)
+		{
+			GetTrieSnapshotKey(hTrieSnapshot, k, sKey, sizeof(sKey));
+			GetTrieString(zoneData[ZD_customKV], sKey, sValue, sizeof(sValue));
+			SQL_EscapeString(g_hDatabase, sKey, sEscapedKey, sizeof(sEscapedKey));
+			SQL_EscapeString(g_hDatabase, sValue, sEscapedValue, sizeof(sEscapedValue));
+			Format(sQuery, sizeof(sQuery), "INSERT INTO `%sscustom_zones_keyvalues` (zone_id, setting, val) VALUES (%s, '%s', '%s')", g_sTablePrefix, sZoneInsert, sEscapedKey, sEscapedValue);
+			SQL_AddQuery(hTransaction, sQuery);
+		}
+		CloseHandle(hTrieSnapshot);
+	}
+	
+	// Delete all deleted clusters now.
+	if (sClustersToDelete[0])
+	{
+		Format(sQuery, sizeof(sQuery), "DELETE FROM `%sclusters` WHERE id IN(%s)", g_sTablePrefix, sClustersToDelete);
+		SQL_AddQuery(hTransaction, sQuery);
+	}
+	
+	SQL_ExecuteTransaction(g_hDatabase, hTransaction, SQLTxn_InsertSuccess, SQLTxn_InsertZonesFailure);
+}
+
+public SQLTxn_InsertSuccess(Handle:db, any:data, numQueries, Handle:results[], any:queryData[])
+{
+}
+
+public SQLTxn_InsertClusterFailure(Handle:db, any:data, numQueries, const String:error[], failIndex, any:queryData[])
+{
+	LogError("Error saving clusters on map (%d/%d). Error: %s", failIndex, numQueries, error);
+}
+
+public SQLTxn_InsertZonesFailure(Handle:db, any:data, numQueries, const String:error[], failIndex, any:queryData[])
+{
+	LogError("Error saving zones on map (%d/%d). Error: %s", failIndex, numQueries, error);
 }
 
 /**
@@ -3635,13 +4258,17 @@ ClearZonesInGroups()
 	for(new i=0;i<iSize;i++)
 	{
 		GetGroupByIndex(i, group);
-		
-		CloseCustomKVInZones(group);
-		ClearArray(group[ZG_zones]);
-		
-		CloseCustomKVInClusters(group);
-		ClearArray(group[ZG_cluster]);
+		ClearZonesinGroup(group);
 	}
+}
+
+ClearZonesinGroup(group[ZoneGroup])
+{
+	CloseCustomKVInZones(group);
+	ClearArray(group[ZG_zones]);
+	
+	CloseCustomKVInClusters(group);
+	ClearArray(group[ZG_cluster]);
 }
 
 CloseCustomKVInZones(group[ZoneGroup])
