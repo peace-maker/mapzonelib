@@ -4,6 +4,11 @@
 #define _mapzonelib_included
 
 /**
+ * Maximal length of a zone group's name.
+ */
+#define MAX_ZONE_GROUP_NAME 64
+
+/**
  * Maximal length of a zone's name.
  */
 #define MAX_ZONE_NAME 64
@@ -84,6 +89,15 @@ native bool:MapZone_SetZoneColor(const String:group[], const String:zoneName[], 
  * @error           Invalid client index.
  */
 native bool:MapZone_SetClientZoneVisibility(const String:group[], const String:zoneName[], client, bool bVisible);
+
+/**
+ * Check if a zone with that name exists in a zone group.
+ *
+ * @param group     The zone group name.
+ * @param zoneName  The zone or cluster name.
+ * @return          True if there is zone or cluster with that name in the group, false otherwise.
+ */
+native bool:MapZone_ZoneExists(const String:group[], const String:zoneName[]);
 
 /**
  * Get an adt_array of zone (and cluster) names of this group.
@@ -183,6 +197,7 @@ public __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_SetMenuBackAction");
 	MarkNativeAsOptional("MapZone_SetZoneDefaultColor");
 	MarkNativeAsOptional("MapZone_SetZoneColor");
+	MarkNativeAsOptional("MapZone_ZoneExists");
 	MarkNativeAsOptional("MapZone_GetGroupZones");
 	MarkNativeAsOptional("MapZone_IsClusteredZone");
 	MarkNativeAsOptional("MapZone_GetClusterZones");

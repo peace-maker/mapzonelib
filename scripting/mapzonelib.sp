@@ -5,8 +5,6 @@
 
 #define PLUGIN_VERSION "1.0"
 
-#define MAX_ZONE_GROUP_NAME 64
-
 #define XYZ(%1) %1[0], %1[1], %1[2]
 
 enum ZoneData {
@@ -158,6 +156,7 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 	CreateNative("MapZone_SetZoneDefaultColor", Native_SetZoneDefaultColor);
 	CreateNative("MapZone_SetZoneColor", Native_SetZoneColor);
 	CreateNative("MapZone_SetClientZoneVisibility", Native_SetClientZoneVisibility);
+	CreateNative("MapZone_ZoneExists", Native_ZoneExists);
 	CreateNative("MapZone_GetGroupZones", Native_GetGroupZones);
 	CreateNative("MapZone_IsClusteredZone", Native_IsClusteredZone);
 	CreateNative("MapZone_GetClusterZones", Native_GetClusterZones);
@@ -953,6 +952,28 @@ public Native_SetMenuBackAction(Handle:plugin, numParams)
 	SaveGroup(group);
 	
 	return true;
+}
+
+// native bool:MapZone_ZoneExists(const String:group[], const String:zoneName[]);
+public Native_ZoneExists(Handle:plugin, numParams)
+{
+	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	new String:sZoneName[MAX_ZONE_NAME];
+	GetNativeString(2, sZoneName, sizeof(sZoneName));
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+		return false;
+	
+	if(ZoneExistsWithName(group, sZoneName))
+		return true;
+	
+	if(ClusterExistsWithName(group, sZoneName))
+		return true;
+	
+	return false;
 }
 
 // native Handle:MapZone_GetGroupZones(const String:group[], bool:bIncludeClusters=true);
