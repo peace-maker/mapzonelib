@@ -71,6 +71,17 @@ functag public MapZoneMenuCancelCB(client, reason, const String:group[]);
 native bool:MapZone_SetMenuCancelAction(const String:group[], MapZoneMenuCancelCB:callback);
 
 /**
+ * Start adding a zone in a zone group. Opens the edit menu afterwards.
+ * The name can optionally already be provided, so the user skips the naming.
+ *
+ * @param client    The client index.
+ * @param group     The zone group name.
+ * @param zoneName  Optional: The name of the new zone.
+ * @noreturn
+ */
+native MapZone_StartAddingZone(client, const String:group[], const String:sZoneName[] = "");
+
+/**
  * Set the default color of the zone beams for this group.
  *
  * @param group   The zone group name.
@@ -207,6 +218,7 @@ public __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_ShowMenu");
 	MarkNativeAsOptional("MapZone_ShowZoneEditMenu");
 	MarkNativeAsOptional("MapZone_SetMenuCancelAction");
+	MarkNativeAsOptional("MapZone_StartAddingZone");
 	MarkNativeAsOptional("MapZone_SetZoneDefaultColor");
 	MarkNativeAsOptional("MapZone_SetZoneColor");
 	MarkNativeAsOptional("MapZone_ZoneExists");

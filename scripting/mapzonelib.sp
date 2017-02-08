@@ -78,6 +78,7 @@ enum ClientMenuState {
 	bool:CMS_editCenter,
 	bool:CMS_editPosition,
 	ZoneEditState:CMS_editState,
+	String:CMS_presetZoneName[MAX_ZONE_NAME], // When adding a zone through the MapZone_StartAddingZone native, a name can be passed with it.
 	ZonePreviewMode:CMS_previewMode,
 	bool:CMS_disablePreview, // Used to not show a preview while in the axes modification menu.
 	CMS_stepSizeIndex, // index into g_fStepsizes array currently used by the client.
@@ -154,6 +155,7 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 	CreateNative("MapZone_ShowMenu", Native_ShowMenu);
 	CreateNative("MapZone_ShowZoneEditMenu", Native_ShowZoneEditMenu);
 	CreateNative("MapZone_SetMenuCancelAction", Native_SetMenuCancelAction);
+	CreateNative("MapZone_StartAddingZone", Native_StartAddingZone);
 	CreateNative("MapZone_SetZoneDefaultColor", Native_SetZoneDefaultColor);
 	CreateNative("MapZone_SetZoneColor", Native_SetZoneColor);
 	CreateNative("MapZone_SetClientZoneVisibility", Native_SetClientZoneVisibility);
@@ -999,6 +1001,48 @@ public Native_SetMenuCancelAction(Handle:plugin, numParams)
 	return true;
 }
 
+// native MapZone_StartAddingZone(client, const String:group[], const String:sZoneName[] = "");
+public Native_StartAddingZone(Handle:plugin, numParams)
+{
+	new client = GetNativeCell(1);
+	if (client <= 0 || client > MaxClients || !IsClientInGame(client))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d)", client);
+		return;
+	}
+	
+	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(2, sGroupName, sizeof(sGroupName));
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid zone group name \"%s\"", sGroupName);
+		return;
+	}
+	
+	new String:sZoneName[MAX_ZONE_NAME];
+	GetNativeString(3, sZoneName, sizeof(sZoneName));
+	if(ZoneExistsWithName(group, sZoneName))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "There already is a zone named \"%s\" in group \"%s\"", sZoneName, sGroupName);
+		return;
+	}
+	
+	if(ClusterExistsWithName(group, sZoneName))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "There already is a cluster named \"%s\" in group \"%s\"", sZoneName, sGroupName);
+		return;
+	}
+	
+	// Save the zone name if there's one given.
+	strcopy(g_ClientMenuState[client][CMS_presetZoneName], MAX_ZONE_NAME, sZoneName);
+	g_ClientMenuState[client][CMS_group] = group[ZG_index];
+	
+	// Start the process of adding a new zone.
+	StartZoneAdding(client);
+}
+
 // native bool:MapZone_ZoneExists(const String:group[], const String:zoneName[]);
 public Native_ZoneExists(Handle:plugin, numParams)
 {
@@ -1789,10 +1833,7 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 		}
 		else if(StrEqual(sInfo, "add"))
 		{
-			g_ClientMenuState[param1][CMS_addZone] = true;
-			g_ClientMenuState[param1][CMS_editState] = ZES_first;
-			DisplayZonePointEditMenu(param1);
-			PrintToChat(param1, "Map Zones > Click on the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
+			StartZoneAdding(param1);
 		}
 		// Paste zone from clipboard.
 		else if(StrEqual(sInfo, "paste"))
@@ -1890,10 +1931,7 @@ public Menu_HandleZoneList(Handle:menu, MenuAction:action, param1, param2)
 
 		if(StrEqual(sInfo, "add"))
 		{
-			g_ClientMenuState[param1][CMS_addZone] = true;
-			g_ClientMenuState[param1][CMS_editState] = ZES_first;
-			DisplayZonePointEditMenu(param1);
-			PrintToChat(param1, "Map Zones > Click on the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
+			StartZoneAdding(param1);
 			return;
 		}
 		
@@ -4527,10 +4565,34 @@ HandleZonePositionSetting(client, const Float:fOrigin[3])
 			
 			if(g_ClientMenuState[client][CMS_addZone])
 			{
-				g_ClientMenuState[client][CMS_editState] = ZES_name;
+				// Don't clear the menu state when we interrupt the point edit menu.
 				g_ClientMenuState[client][CMS_redrawPointMenu] = true;
-				DisplayZoneAddFinalizationMenu(client);
-				PrintToChat(client, "Map Zones > Please type a name for this zone in chat. Type \"!abort\" to abort.");
+				
+				new group[ZoneGroup];
+				GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
+				
+				// See if we have a valid name already given.
+				new bool:bPresetName = g_ClientMenuState[client][CMS_presetZoneName][0] != 0;
+				
+				// There is a name already given for this zone. use it.
+				if (!ZoneExistsWithName(group, g_ClientMenuState[client][CMS_presetZoneName])
+				&& !ClusterExistsWithName(group, g_ClientMenuState[client][CMS_presetZoneName]))
+				{
+					SaveNewZone(client, g_ClientMenuState[client][CMS_presetZoneName]);
+				}
+				else
+				{
+					// Inform admin that the preset name failed.
+					if (bPresetName)
+					{
+						PrintToChat(client, "Map Zones > A zone with the name \"%s\" in group \"%s\" already exists.", g_ClientMenuState[client][CMS_presetZoneName], group[ZG_name]);
+					}
+					
+					g_ClientMenuState[client][CMS_editState] = ZES_name;
+					
+					DisplayZoneAddFinalizationMenu(client);
+					PrintToChat(client, "Map Zones > Please type a name for this zone in chat. Type \"!abort\" to abort.");
+				}
 			}
 			
 			// Show the new zone immediately
@@ -4770,10 +4832,19 @@ HandleZoneDefaultHeight(&Float:fFirstPointZ, &Float:fSecondPointZ)
 	}
 }
 
+StartZoneAdding(client)
+{
+	g_ClientMenuState[client][CMS_addZone] = true;
+	g_ClientMenuState[client][CMS_editState] = ZES_first;
+	DisplayZonePointEditMenu(client);
+	PrintToChat(client, "Map Zones > Click on the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
+}
+
 ResetZoneAddingState(client)
 {
 	g_ClientMenuState[client][CMS_addZone] = false;
 	g_ClientMenuState[client][CMS_editState] = ZES_first;
+	g_ClientMenuState[client][CMS_presetZoneName][0] = 0;
 	Array_Fill(g_ClientMenuState[client][CMS_first], 3, 0.0);
 	Array_Fill(g_ClientMenuState[client][CMS_second], 3, 0.0);
 	ClearHandle(g_hShowZoneWhileEditTimer[client]);
