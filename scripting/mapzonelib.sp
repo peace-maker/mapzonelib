@@ -152,6 +152,7 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 {
 	CreateNative("MapZone_RegisterZoneGroup", Native_RegisterZoneGroup);
 	CreateNative("MapZone_ShowMenu", Native_ShowMenu);
+	CreateNative("MapZone_ShowZoneEditMenu", Native_ShowZoneEditMenu);
 	CreateNative("MapZone_SetMenuCancelAction", Native_SetMenuCancelAction);
 	CreateNative("MapZone_SetZoneDefaultColor", Native_SetZoneDefaultColor);
 	CreateNative("MapZone_SetZoneColor", Native_SetZoneColor);
@@ -815,6 +816,49 @@ public Native_ShowMenu(Handle:plugin, numParams)
 	
 	DisplayGroupRootMenu(client, group);
 	return true;
+}
+
+// native MapZone_ShowZoneEditMenu(client, const String:group[], const String:zoneName[]);
+public Native_ShowZoneEditMenu(Handle:plugin, numParams)
+{
+	new client = GetNativeCell(1);
+	if (client <= 0 || client > MaxClients || !IsClientInGame(client))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d)", client);
+		return;
+	}
+
+	new String:sName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(2, sName, sizeof(sName));
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sName, group))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid map group name \"%s\"", sName);
+		return;
+	}
+	
+	// Show the right edit menu for that zone or cluster.
+	new String:sZoneName[MAX_ZONE_NAME];
+	GetNativeString(3, sZoneName, sizeof(sZoneName));
+	new zoneCluster[ZoneCluster], zoneData[ZoneData];
+	if (GetZoneClusterByName(sZoneName, group, zoneCluster))
+	{
+		g_ClientMenuState[client][CMS_group] = group[ZG_index];
+		g_ClientMenuState[client][CMS_cluster] = zoneCluster[ZC_index];
+		DisplayClusterEditMenu(client);
+	}
+	else if (GetZoneByName(sZoneName, group, zoneData))
+	{
+		g_ClientMenuState[client][CMS_group] = group[ZG_index];
+		g_ClientMenuState[client][CMS_zone] = zoneData[ZD_index];
+		DisplayZoneEditMenu(client);
+	}
+	else
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid zone or cluster name \"%s\"", sName);
+		return;
+	}
 }
 
 // native bool:MapZone_SetZoneDefaultColor(const String:group[], const iColor[4]);

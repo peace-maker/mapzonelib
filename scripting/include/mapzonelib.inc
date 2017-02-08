@@ -37,6 +37,16 @@ native MapZone_RegisterZoneGroup(const String:group[]);
 native bool:MapZone_ShowMenu(client, const String:group[]);
 
 /**
+ * Show the edit menu of a zone or cluster right away.
+ *
+ * @param client    The client index.
+ * @param group     The zone group name.
+ * @param zoneName  The name of the zone or cluster.
+ * @noreturn
+ */
+native MapZone_ShowZoneEditMenu(client, const String:group[], const String:zoneName[]);
+
+/**
  * Called when a client selects the "Back" option in
  * the zone group's root menu.
  * Can be used to make the transition back into your own
@@ -195,6 +205,7 @@ public __pl_mapzonelib_SetNTVOptional()
 {
 	MarkNativeAsOptional("MapZone_RegisterZoneGroup");
 	MarkNativeAsOptional("MapZone_ShowMenu");
+	MarkNativeAsOptional("MapZone_ShowZoneEditMenu");
 	MarkNativeAsOptional("MapZone_SetMenuCancelAction");
 	MarkNativeAsOptional("MapZone_SetZoneDefaultColor");
 	MarkNativeAsOptional("MapZone_SetZoneColor");
