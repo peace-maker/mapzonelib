@@ -152,7 +152,7 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 {
 	CreateNative("MapZone_RegisterZoneGroup", Native_RegisterZoneGroup);
 	CreateNative("MapZone_ShowMenu", Native_ShowMenu);
-	CreateNative("MapZone_SetMenuBackAction", Native_SetMenuBackAction);
+	CreateNative("MapZone_SetMenuCancelAction", Native_SetMenuCancelAction);
 	CreateNative("MapZone_SetZoneDefaultColor", Native_SetZoneDefaultColor);
 	CreateNative("MapZone_SetZoneColor", Native_SetZoneColor);
 	CreateNative("MapZone_SetClientZoneVisibility", Native_SetClientZoneVisibility);
@@ -926,16 +926,16 @@ public Native_SetClientZoneVisibility(Handle:plugin, numParams)
 	return false;
 }
 
-// native bool:MapZone_SetMenuBackAction(const String:group[], MapZoneMenuBackCB:callback);
-public Native_SetMenuBackAction(Handle:plugin, numParams)
+// native bool:MapZone_SetMenuCancelAction(const String:group[], MapZoneMenuCancelCB:callback);
+public Native_SetMenuCancelAction(Handle:plugin, numParams)
 {
 	new String:sName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sName, sizeof(sName));
 	
 #if SOURCEMOD_V_MAJOR >= 1 && SOURCEMOD_V_MINOR >= 7
-	new MapZoneMenuBackCB:callback = MapZoneMenuBackCB:GetNativeFunction(2);
+	new MapZoneMenuCancelCB:callback = MapZoneMenuCancelCB:GetNativeFunction(2);
 #else
-	new MapZoneMenuBackCB:callback = MapZoneMenuBackCB:GetNativeCell(2);
+	new MapZoneMenuCancelCB:callback = MapZoneMenuCancelCB:GetNativeCell(2);
 #endif
 	
 	new group[ZoneGroup];
@@ -947,7 +947,8 @@ public Native_SetMenuBackAction(Handle:plugin, numParams)
 		// Private forwards don't allow to just clear all functions from the list. You HAVE to give the plugin handle -.-
 		CloseHandle(group[ZG_menuBackForward]);
 	
-	group[ZG_menuBackForward] = CreateForward(ET_Ignore, Param_Cell, Param_String);
+	// functag public MapZoneMenuCancelCB(client, reason, const String:group[]);
+	group[ZG_menuBackForward] = CreateForward(ET_Ignore, Param_Cell, Param_Cell, Param_String);
 	AddToForward(group[ZG_menuBackForward], plugin, callback);
 	SaveGroup(group);
 	
@@ -1768,18 +1769,16 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 	}
 	else if(action == MenuAction_Cancel)
 	{
-		if(param2 == MenuCancel_ExitBack)
+		new group[ZoneGroup];
+		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
+		// This group has a menu back action handler registered? Call it!
+		if(group[ZG_menuBackForward] != INVALID_HANDLE)
 		{
-			new group[ZoneGroup];
-			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
-			// This group has a menu back action handler registered? Call it!
-			if(group[ZG_menuBackForward] != INVALID_HANDLE)
-			{
-				Call_StartForward(group[ZG_menuBackForward]);
-				Call_PushCell(param1);
-				Call_PushString(group[ZG_name]);
-				Call_Finish();
-			}
+			Call_StartForward(group[ZG_menuBackForward]);
+			Call_PushCell(param1);
+			Call_PushCell(param2);
+			Call_PushString(group[ZG_name]);
+			Call_Finish();
 		}
 		g_ClientMenuState[param1][CMS_group] = -1;
 	}

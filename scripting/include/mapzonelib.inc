@@ -43,21 +43,22 @@ native bool:MapZone_ShowMenu(client, const String:group[]);
  * menu hierachy.
  *
  * @param client   The client index.
+ * @param reason   The reason why the menu got cancelled. One of the default MenuCancel_* values.
  * @param group    The zone group name.
  * @noreturn
  */
-functag public MapZoneMenuBackCB(client, const String:group[]);
+functag public MapZoneMenuCancelCB(client, reason, const String:group[]);
 
 /**
- * Register for the back action of the zone group menu.
- * Whenever a client wants to go back from the zone menus,
- * you're able to show your own menus again using this callback.
+ * Register for the cancel action of the zone group menu.
+ * Whenever a client cancels the menu or wants to go back from the zone menus,
+ * you're able to show your own menus again or do other cleanup using this callback.
  *
  * @param group    The zone group name.
- * @param callback The callback function to call when a player presses the "Back" button in the zone root menu.
+ * @param callback The callback function to call when the zone root menu is cancelled.
  * @return True if callback registered, false if no zone group with that name.
  */
-native bool:MapZone_SetMenuBackAction(const String:group[], MapZoneMenuBackCB:callback);
+native bool:MapZone_SetMenuCancelAction(const String:group[], MapZoneMenuCancelCB:callback);
 
 /**
  * Set the default color of the zone beams for this group.
@@ -194,7 +195,7 @@ public __pl_mapzonelib_SetNTVOptional()
 {
 	MarkNativeAsOptional("MapZone_RegisterZoneGroup");
 	MarkNativeAsOptional("MapZone_ShowMenu");
-	MarkNativeAsOptional("MapZone_SetMenuBackAction");
+	MarkNativeAsOptional("MapZone_SetMenuCancelAction");
 	MarkNativeAsOptional("MapZone_SetZoneDefaultColor");
 	MarkNativeAsOptional("MapZone_SetZoneColor");
 	MarkNativeAsOptional("MapZone_ZoneExists");
