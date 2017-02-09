@@ -48,12 +48,15 @@ native bool:MapZone_ShowMenu(client, const String:group[]);
 /**
  * Show the edit menu of a zone or cluster right away.
  *
- * @param client    The client index.
- * @param group     The zone group name.
- * @param zoneName  The name of the zone or cluster.
+ * @param client                The client index.
+ * @param group                 The zone group name.
+ * @param zoneName              The name of the zone or cluster.
+ * @param bEnableCancelForward  Call the menu cancel forward when going back from this edit menu
+ *                              instead of the zone list? Ignored if no menu cancel callback registered.
+ *                              @see MapZone_SetMenuCancelAction
  * @noreturn
  */
-native MapZone_ShowZoneEditMenu(client, const String:group[], const String:zoneName[]);
+native MapZone_ShowZoneEditMenu(client, const String:group[], const String:zoneName[], bool:bEnableCancelForward = false);
 
 /**
  * Called when a client selects the "Back" option in
@@ -86,9 +89,13 @@ native bool:MapZone_SetMenuCancelAction(const String:group[], MapZoneMenuCancelC
  * @param client    The client index.
  * @param group     The zone group name.
  * @param zoneName  Optional: The name of the new zone.
+ * @param bEnableCancelForward  Call the menu cancel forward when aborting the add or going 
+ *                              back from the edit menu instead of the zone list?
+ *                              Ignored if no menu cancel callback registered.
+ *                              @see MapZone_SetMenuCancelAction
  * @noreturn
  */
-native MapZone_StartAddingZone(client, const String:group[], const String:sZoneName[] = "");
+native MapZone_StartAddingZone(client, const String:group[], const String:sZoneName[] = "", bool:bEnableCancelForward = false);
 
 /**
  * Set the default color of the zone beams for this group.

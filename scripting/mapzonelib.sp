@@ -44,7 +44,7 @@ enum ZoneGroup {
 	ZG_index,
 	Handle:ZG_zones,
 	Handle:ZG_cluster,
-	Handle:ZG_menuBackForward,
+	Handle:ZG_menuCancelForward,
 	ZG_filterEntTeam[2], // Filter entities for teams
 	bool:ZG_showZones,
 	bool:ZG_adminShowZones[MAXPLAYERS+1], // Just to remember if we want to toggle all zones in this group on or off.
@@ -79,6 +79,7 @@ enum ClientMenuState {
 	bool:CMS_editPosition,
 	ZoneEditState:CMS_editState,
 	String:CMS_presetZoneName[MAX_ZONE_NAME], // When adding a zone through the MapZone_StartAddingZone native, a name can be passed with it.
+	bool:CMS_backToMenuAfterEdit, // Call the menuCancel forward of the group after editing or adding a zone.
 	ZonePreviewMode:CMS_previewMode,
 	bool:CMS_disablePreview, // Used to not show a preview while in the axes modification menu.
 	CMS_stepSizeIndex, // index into g_fStepsizes array currently used by the client.
@@ -323,6 +324,7 @@ public OnClientDisconnect(client)
 	g_ClientMenuState[client][CMS_editRotation] = false;
 	g_ClientMenuState[client][CMS_editCenter] = false;
 	g_ClientMenuState[client][CMS_editPosition] = false;
+	g_ClientMenuState[client][CMS_backToMenuAfterEdit] = false;
 	g_ClientMenuState[client][CMS_previewMode] = ZPM_aim;
 	g_ClientMenuState[client][CMS_disablePreview] = false;
 	g_ClientMenuState[client][CMS_stepSizeIndex] = DEFAULT_STEPSIZE_INDEX;
@@ -790,7 +792,7 @@ public Native_RegisterZoneGroup(Handle:plugin, numParams)
 	group[ZG_zones] = CreateArray(_:ZoneData);
 	group[ZG_cluster] = CreateArray(_:ZoneCluster);
 	group[ZG_showZones] = GetConVarBool(g_hCVShowZonesDefault);
-	group[ZG_menuBackForward] = INVALID_HANDLE;
+	group[ZG_menuCancelForward] = INVALID_HANDLE;
 	group[ZG_filterEntTeam][0] = INVALID_ENT_REFERENCE;
 	group[ZG_filterEntTeam][1] = INVALID_ENT_REFERENCE;
 	// Default to red color.
@@ -830,7 +832,7 @@ public Native_ShowMenu(Handle:plugin, numParams)
 	return true;
 }
 
-// native MapZone_ShowZoneEditMenu(client, const String:group[], const String:zoneName[]);
+// native MapZone_ShowZoneEditMenu(client, const String:group[], const String:zoneName[], bool:bEnableCancelForward = false);
 public Native_ShowZoneEditMenu(Handle:plugin, numParams)
 {
 	new client = GetNativeCell(1);
@@ -849,6 +851,8 @@ public Native_ShowZoneEditMenu(Handle:plugin, numParams)
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid map group name \"%s\"", sName);
 		return;
 	}
+	
+	new bool:bEnableCancelForward = bool:GetNativeCell(3);
 	
 	// Show the right edit menu for that zone or cluster.
 	new String:sZoneName[MAX_ZONE_NAME];
@@ -871,6 +875,8 @@ public Native_ShowZoneEditMenu(Handle:plugin, numParams)
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid zone or cluster name \"%s\"", sName);
 		return;
 	}
+	
+	g_ClientMenuState[client][CMS_backToMenuAfterEdit] = bEnableCancelForward;
 }
 
 // native bool:MapZone_SetZoneDefaultColor(const String:group[], const iColor[4]);
@@ -999,13 +1005,13 @@ public Native_SetMenuCancelAction(Handle:plugin, numParams)
 		return false;
 	
 	// Someone registered a menu back action before. Overwrite it.
-	if(group[ZG_menuBackForward] != INVALID_HANDLE)
+	if(group[ZG_menuCancelForward] != INVALID_HANDLE)
 		// Private forwards don't allow to just clear all functions from the list. You HAVE to give the plugin handle -.-
-		CloseHandle(group[ZG_menuBackForward]);
+		CloseHandle(group[ZG_menuCancelForward]);
 	
 	// functag public MapZoneMenuCancelCB(client, reason, const String:group[]);
-	group[ZG_menuBackForward] = CreateForward(ET_Ignore, Param_Cell, Param_Cell, Param_String);
-	AddToForward(group[ZG_menuBackForward], plugin, callback);
+	group[ZG_menuCancelForward] = CreateForward(ET_Ignore, Param_Cell, Param_Cell, Param_String);
+	AddToForward(group[ZG_menuCancelForward], plugin, callback);
 	SaveGroup(group);
 	
 	return true;
@@ -1045,9 +1051,12 @@ public Native_StartAddingZone(Handle:plugin, numParams)
 		return;
 	}
 	
+	new bool:bEnableCancelForward = bool:GetNativeCell(4);
+	
 	// Save the zone name if there's one given.
 	strcopy(g_ClientMenuState[client][CMS_presetZoneName], MAX_ZONE_NAME, sZoneName);
 	g_ClientMenuState[client][CMS_group] = group[ZG_index];
+	g_ClientMenuState[client][CMS_backToMenuAfterEdit] = bEnableCancelForward;
 	
 	// Start the process of adding a new zone.
 	StartZoneAdding(client);
@@ -1731,7 +1740,7 @@ DisplayGroupRootMenu(client, group[ZoneGroup])
 	new Handle:hMenu = CreateMenu(Menu_HandleGroupRoot);
 	SetMenuTitle(hMenu, "Manage zone group \"%s\"", group[ZG_name]);
 	SetMenuExitButton(hMenu, true);
-	if(group[ZG_menuBackForward] != INVALID_HANDLE)
+	if(group[ZG_menuCancelForward] != INVALID_HANDLE)
 		SetMenuExitBackButton(hMenu, true);
 	
 	new String:sBuffer[64];
@@ -1867,9 +1876,9 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 		new group[ZoneGroup];
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 		// This group has a menu back action handler registered? Call it!
-		if(group[ZG_menuBackForward] != INVALID_HANDLE)
+		if(group[ZG_menuCancelForward] != INVALID_HANDLE)
 		{
-			Call_StartForward(group[ZG_menuBackForward]);
+			Call_StartForward(group[ZG_menuCancelForward]);
 			Call_PushCell(param1);
 			Call_PushCell(param2);
 			Call_PushString(group[ZG_name]);
@@ -2352,6 +2361,13 @@ DisplayZoneEditMenu(client)
 
 	if(zoneData[ZD_deleted])
 	{
+		if (TryCallMenuCancelForward(client, MenuCancel_ExitBack))
+		{
+			g_ClientMenuState[client][CMS_group] = -1;
+			g_ClientMenuState[client][CMS_zone] = -1;
+			g_ClientMenuState[client][CMS_cluster] = -1;
+			return;
+		}
 		DisplayGroupRootMenu(client, group);
 		return;
 	}
@@ -2508,6 +2524,15 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 	else if(action == MenuAction_Cancel)
 	{
 		g_ClientMenuState[param1][CMS_zone] = -1;
+		
+		// Don't open our own menus when we're told to call the menu cancel forward.
+		if (TryCallMenuCancelForward(param1, param2))
+		{
+			g_ClientMenuState[param1][CMS_group] = -1;
+			g_ClientMenuState[param1][CMS_cluster] = -1;
+			return;
+		}
+		
 		if(param2 == MenuCancel_ExitBack)
 		{
 			if(g_ClientMenuState[param1][CMS_cluster] != -1)
@@ -2531,6 +2556,14 @@ DisplayZoneEditDetailsMenu(client)
 
 	if(zoneData[ZD_deleted])
 	{
+		if (TryCallMenuCancelForward(client, MenuCancel_ExitBack))
+		{
+			g_ClientMenuState[client][CMS_group] = -1;
+			g_ClientMenuState[client][CMS_zone] = -1;
+			g_ClientMenuState[client][CMS_cluster] = -1;
+			return;
+		}
+		
 		DisplayGroupRootMenu(client, group);
 		return;
 	}
@@ -2614,6 +2647,7 @@ public Menu_HandleZoneEditDetails(Handle:menu, MenuAction:action, param1, param2
 		}
 		else
 		{
+			TryCallMenuCancelForward(param1, param2);
 			g_ClientMenuState[param1][CMS_zone] = -1;
 			g_ClientMenuState[param1][CMS_group] = -1;
 			g_ClientMenuState[param1][CMS_cluster] = -1;
@@ -2698,6 +2732,7 @@ public Menu_HandleClusterSelection(Handle:menu, MenuAction:action, param1, param
 		}
 		else
 		{
+			TryCallMenuCancelForward(param1, param2);
 			g_ClientMenuState[param1][CMS_zone] = -1;
 			g_ClientMenuState[param1][CMS_cluster] = -1;
 			g_ClientMenuState[param1][CMS_group] = -1;
@@ -2731,6 +2766,7 @@ public Panel_HandleConfirmRemoveFromCluster(Handle:menu, MenuAction:action, para
 	}
 	else if(action == MenuAction_Cancel)
 	{
+		TryCallMenuCancelForward(param1, param2);
 		g_ClientMenuState[param1][CMS_group] = -1;
 		g_ClientMenuState[param1][CMS_cluster] = -1;
 		g_ClientMenuState[param1][CMS_zone] = -1;
@@ -2760,6 +2796,13 @@ public Panel_HandleConfirmDeleteZone(Handle:menu, MenuAction:action, param1, par
 			if(g_ClientMenuState[param1][CMS_cluster] == -1)
 			{
 				LogAction(param1, -1, "%L deleted zone \"%s\" of group \"%s\".", param1, zoneData[ZD_name], group[ZG_name]);
+				// Don't open our own menu if we're told to call the menu cancel callback.
+				if (TryCallMenuCancelForward(param1, MenuCancel_ExitBack))
+				{
+					g_ClientMenuState[param1][CMS_group] = -1;
+					return;
+				}
+				
 				DisplayZoneListMenu(param1);
 			}
 			else
@@ -2778,6 +2821,7 @@ public Panel_HandleConfirmDeleteZone(Handle:menu, MenuAction:action, param1, par
 	}
 	else if(action == MenuAction_Cancel)
 	{
+		TryCallMenuCancelForward(param1, param2);
 		g_ClientMenuState[param1][CMS_group] = -1;
 		g_ClientMenuState[param1][CMS_cluster] = -1;
 		g_ClientMenuState[param1][CMS_zone] = -1;
@@ -2926,13 +2970,15 @@ public Menu_HandleZonePointEdit(Handle:menu, MenuAction:action, param1, param2)
 		ResetZoneAddingState(param1);
 		if(param2 == MenuCancel_ExitBack)
 		{
-			if(bAdding)
+			// Only go back to the zone list if we aren't told to call the menucancel callback.
+			if(bAdding && !TryCallMenuCancelForward(param1, param2))
 				DisplayZoneListMenu(param1);
-			else
+			else if (!bAdding)
 				DisplayZoneEditDetailsMenu(param1);
 		}
 		else
 		{
+			TryCallMenuCancelForward(param1, param2);
 			g_ClientMenuState[param1][CMS_zone] = -1;
 			g_ClientMenuState[param1][CMS_cluster] = -1;
 			g_ClientMenuState[param1][CMS_group] = -1;
@@ -3069,6 +3115,9 @@ public Menu_HandlePointAxisEdit(Handle:menu, MenuAction:action, param1, param2)
 	}
 	else if(action == MenuAction_Cancel)
 	{
+		// See if we need to call the menu cancel forward, if this menu was opened by a plugin
+		TryCallMenuCancelForward(param1, param2);
+		
 		g_ClientMenuState[param1][CMS_disablePreview] = false;
 		g_ClientMenuState[param1][CMS_editCenter] = false;
 		g_ClientMenuState[param1][CMS_editPosition] = false;
@@ -3147,6 +3196,8 @@ public Menu_HandleZoneRotation(Handle:menu, MenuAction:action, param1, param2)
 		}
 		else
 		{
+			TryCallMenuCancelForward(param1, param2);
+			
 			g_ClientMenuState[param1][CMS_zone] = -1;
 			g_ClientMenuState[param1][CMS_cluster] = -1;
 			g_ClientMenuState[param1][CMS_group] = -1;
@@ -3218,6 +3269,11 @@ public Menu_HandleAddFinalization(Handle:menu, MenuAction:action, param1, param2
 			ResetZoneAddingState(param1);
 			// In case we were pasting a zone from clipboard.
 			g_ClientMenuState[param1][CMS_editCenter] = false;
+			
+			// Don't open our own menus if we're supposed to call the menu cancel callback.
+			if (TryCallMenuCancelForward(param1, MenuCancel_ExitBack))
+				return;
+			
 			if(g_ClientMenuState[param1][CMS_cluster] == -1)
 				DisplayZoneListMenu(param1);
 			else
@@ -3227,6 +3283,18 @@ public Menu_HandleAddFinalization(Handle:menu, MenuAction:action, param1, param2
 	else if(action == MenuAction_Cancel)
 	{
 		ResetZoneAddingState(param1);
+		
+		// Don't open our own menus if we're supposed to call the menu cancel callback.
+		if (g_ClientMenuState[param1][CMS_zone] == -1
+		&& TryCallMenuCancelForward(param1, param2))
+		{
+			// In case we were pasting a zone from clipboard.
+			g_ClientMenuState[param1][CMS_editCenter] = false;
+			g_ClientMenuState[param1][CMS_group] = -1;
+			g_ClientMenuState[param1][CMS_cluster] = -1;
+			return;
+		}
+		
 		if(param2 == MenuCancel_ExitBack)
 		{
 			// In case we were pasting a zone from clipboard.
@@ -3249,6 +3317,30 @@ public Menu_HandleAddFinalization(Handle:menu, MenuAction:action, param1, param2
 			g_ClientMenuState[param1][CMS_cluster] = -1;
 		}
 	}
+}
+
+bool:TryCallMenuCancelForward(client, cancelReason)
+{
+	// See if we need to call the menu cancel forward, if this menu was opened by a plugin
+	if (!g_ClientMenuState[client][CMS_backToMenuAfterEdit])
+		return false;
+	
+	// Reset this state again, so we can navigate the menu normally.
+	g_ClientMenuState[client][CMS_backToMenuAfterEdit] = false;
+	
+	new group[ZoneGroup];
+	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
+	// No cancel callback registered for this group?
+	if (!group[ZG_menuCancelForward])
+		return false;
+	
+	// Call the forward in the other plugin.
+	Call_StartForward(group[ZG_menuCancelForward]);
+	Call_PushCell(client);
+	Call_PushCell(cancelReason);
+	Call_PushString(group[ZG_name]);
+	Call_Finish();
+	return true;
 }
 
 /**
