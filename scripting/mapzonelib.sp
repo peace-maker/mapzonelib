@@ -163,6 +163,8 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 	CreateNative("MapZone_SetZoneColor", Native_SetZoneColor);
 	CreateNative("MapZone_SetClientZoneVisibility", Native_SetClientZoneVisibility);
 	CreateNative("MapZone_ZoneExists", Native_ZoneExists);
+	CreateNative("MapZone_GetZoneIndex", Native_GetZoneIndex);
+	CreateNative("MapZone_GetZoneNameByIndex", Native_GetZoneNameByIndex);
 	CreateNative("MapZone_GetGroupZones", Native_GetGroupZones);
 	CreateNative("MapZone_GetZoneType", Native_GetZoneType);
 	CreateNative("MapZone_GetClusterZones", Native_GetClusterZones);
@@ -1082,6 +1084,99 @@ public Native_ZoneExists(Handle:plugin, numParams)
 		return true;
 	
 	return false;
+}
+
+// native MapZone_GetZoneIndex(const String:group[], const String:zoneName[], &MapZoneType:mapZoneType);
+public Native_GetZoneIndex(Handle:plugin, numParams)
+{
+	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	new String:sZoneName[MAX_ZONE_NAME];
+	GetNativeString(2, sZoneName, sizeof(sZoneName));
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid group name \"%s\"", sGroupName);
+		return -1;
+	}
+	
+	new zoneData[ZoneData];
+	if(GetZoneByName(sZoneName, group, zoneData))
+	{
+		SetNativeCellRef(3, MapZoneType_Zone);
+		return zoneData[ZD_index];
+	}
+	
+	new zoneCluster[ZoneCluster];
+	if(GetZoneClusterByName(sZoneName, group, zoneCluster))
+	{
+		SetNativeCellRef(3, MapZoneType_Cluster);
+		return zoneCluster[ZC_index];
+	}
+	
+	ThrowNativeError(SP_ERROR_NATIVE, "No zone or cluster with name \"%s\" in group \"%s\".", sZoneName, sGroupName);
+	return -1;
+}
+
+// native bool:MapZone_GetZoneNameByIndex(const String:group[], zoneIndex, MapZoneType:mapZoneType, String:zoneName[], maxlen);
+public Native_GetZoneNameByIndex(Handle:plugin, numParams)
+{
+	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid group name \"%s\"", sGroupName);
+		return false;
+	}
+	
+	new iZoneIndex = GetNativeCell(2);
+	new MapZoneType:iZoneType = MapZoneType:GetNativeCell(3);
+	new iMaxlen = GetNativeCell(5);
+	
+	switch (iZoneType)
+	{
+		case MapZoneType_Zone:
+		{
+			if (iZoneIndex < 0 || iZoneIndex >= GetArraySize(group[ZG_zones]))
+			{
+				ThrowNativeError(SP_ERROR_NATIVE, "Invalid zone index %d", iZoneIndex);
+				return false;
+			}
+			
+			new zoneData[ZoneData];
+			GetZoneByIndex(iZoneIndex, group, zoneData);
+			if (zoneData[ZD_deleted])
+				return false;
+			
+			SetNativeString(4, zoneData[ZD_name], iMaxlen);
+		}
+		case MapZoneType_Cluster:
+		{
+			if (iZoneIndex < 0 || iZoneIndex >= GetArraySize(group[ZG_cluster]))
+			{
+				ThrowNativeError(SP_ERROR_NATIVE, "Invalid cluster index %d", iZoneIndex);
+				return false;
+			}
+			
+			new zoneCluster[ZoneCluster];
+			GetZoneClusterByIndex(iZoneIndex, group, zoneCluster);
+			if (zoneCluster[ZC_deleted])
+				return false;
+			
+			SetNativeString(4, zoneCluster[ZC_name], iMaxlen);
+		}
+		default:
+		{
+			ThrowNativeError(SP_ERROR_NATIVE, "Invalid zone type %d", iZoneType);
+			return false;
+		}
+	}
+	
+	return true;
 }
 
 // native Handle:MapZone_GetGroupZones(const String:group[], bool:bIncludeClusters=true);

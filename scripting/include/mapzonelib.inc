@@ -138,6 +138,34 @@ native bool:MapZone_SetClientZoneVisibility(const String:group[], const String:z
 native bool:MapZone_ZoneExists(const String:group[], const String:zoneName[]);
 
 /**
+ * Get the temporary internal zone index which is a unique identifier of the zone during the map.
+ * It can change between mapchanges, so don't store it permanently. Use the zone name instead.
+ * Can be used as a unique reference to a zone in your own data structures.
+ * @see MapZone_GetZoneNameByIndex
+ *
+ * @param group        The zone group name.
+ * @param zoneName     The zone or cluster name.
+ * @param mapZoneType  Will be set to the type of the zone. Cluster or standalone zone.
+ * @return             The internal index of the zone.
+ * @error              Invalid group or zone name.
+ */
+native MapZone_GetZoneIndex(const String:group[], const String:zoneName[], &MapZoneType:mapZoneType);
+
+/**
+ * Get the name of the zone or cluster behind that internal index.
+ * @see MapZone_GetZoneIndex
+ *
+ * @param group        The zone group name.
+ * @param zoneIndex    The internal index of the zone or cluster.
+ * @param mapZoneType  The type of the index as returned by MapZone_GetZoneIndex.
+ * @param zoneName     Buffer to store the zone or cluster name in.
+ * @param maxlen       Size of the buffer.
+ * @return             True if name was copied, false if zone or cluster got deleted.
+ * @error              Invalid group name or invalid index for that type.
+ */
+native bool:MapZone_GetZoneNameByIndex(const String:group[], zoneIndex, MapZoneType:mapZoneType, String:zoneName[], maxlen);
+
+/**
  * Get an adt_array of zone (and cluster) names of this group.
  * Zone names are at most MAX_ZONE_NAME long.
  * 
@@ -282,6 +310,8 @@ public __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_StartAddingZone");
 	MarkNativeAsOptional("MapZone_SetZoneDefaultColor");
 	MarkNativeAsOptional("MapZone_SetZoneColor");
+	MarkNativeAsOptional("MapZone_GetZoneIndex");
+	MarkNativeAsOptional("MapZone_GetZoneNameByIndex");
 	MarkNativeAsOptional("MapZone_ZoneExists");
 	MarkNativeAsOptional("MapZone_GetGroupZones");
 	MarkNativeAsOptional("MapZone_GetZoneType");
