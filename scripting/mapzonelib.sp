@@ -3964,7 +3964,7 @@ SaveZoneGroupToDatabase(group[ZoneGroup])
 		
 		// Have to remove all kv first
 		// This is much easier than tracking which key got deleted.
-		Format(sQuery, sizeof(sQuery), "DELETE FROM `%sscustom_cluster_keyvalues` WHERE cluster_id = %d", g_sTablePrefix, zoneCluster[ZC_databaseId]);
+		Format(sQuery, sizeof(sQuery), "DELETE FROM `%scustom_cluster_keyvalues` WHERE cluster_id = %d", g_sTablePrefix, zoneCluster[ZC_databaseId]);
 		SQL_AddQuery(hTransaction, sQuery);
 		
 		hTrieSnapshot = CreateTrieSnapshot(zoneCluster[ZC_customKV]);
@@ -3975,7 +3975,7 @@ SaveZoneGroupToDatabase(group[ZoneGroup])
 			GetTrieString(zoneCluster[ZC_customKV], sKey, sValue, sizeof(sValue));
 			SQL_EscapeString(g_hDatabase, sKey, sEscapedKey, sizeof(sEscapedKey));
 			SQL_EscapeString(g_hDatabase, sValue, sEscapedValue, sizeof(sEscapedValue));
-			Format(sQuery, sizeof(sQuery), "INSERT INTO `%sscustom_cluster_keyvalues` (cluster_id, setting, val) VALUES (%s, '%s', '%s')", g_sTablePrefix, sClusterInsert, sEscapedKey, sEscapedValue);
+			Format(sQuery, sizeof(sQuery), "INSERT INTO `%scustom_cluster_keyvalues` (cluster_id, setting, val) VALUES (%s, '%s', '%s')", g_sTablePrefix, sClusterInsert, sEscapedKey, sEscapedValue);
 			SQL_AddQuery(hTransaction, sQuery);
 		}
 		CloseHandle(hTrieSnapshot);
@@ -4040,13 +4040,13 @@ SaveZoneGroupToDatabase(group[ZoneGroup])
 			Format(sQuery, sizeof(sQuery), "INSERT INTO `%szones` (cluster_id, groupname, map, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color) VALUES (%s, '%s', '%s', '%s', %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %d, %d)", g_sTablePrefix, sClusterInsert, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName, XYZ(zoneData[ZD_position]), XYZ(zoneData[ZD_mins]), XYZ(zoneData[ZD_maxs]), XYZ(zoneData[ZD_rotation]), zoneData[ZD_teamFilter], iColor);
 			
 			// This zone isn't in the database yet, so we need to fetch the id after it got inserted for the custom keyvalues.
-			Format(sClusterInsert, sizeof(sClusterInsert), "(SELECT id FROM `%szones` WHERE groupname = '%s' AND map = '%s' AND name = '%s')", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName);
+			Format(sZoneInsert, sizeof(sZoneInsert), "(SELECT id FROM `%szones` WHERE groupname = '%s' AND map = '%s' AND name = '%s')", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName);
 		}
 		else
 		{
 			Format(sQuery, sizeof(sQuery), "UPDATE `%szones` SET cluster_id = %s, name = '%s', pos_x = %f, pos_y = %f, pos_z = %f, min_x = %f, min_y = %f, min_z = %f, max_x = %f, max_y = %f, max_z = %f, rotation_x = %f, rotation_y = %f, rotation_z = %f, team = %d, color = %d WHERE id = %d", g_sTablePrefix, sClusterInsert, sEscapedZoneName, XYZ(zoneData[ZD_position]), XYZ(zoneData[ZD_mins]), XYZ(zoneData[ZD_maxs]), XYZ(zoneData[ZD_rotation]), zoneData[ZD_teamFilter], iColor, zoneData[ZD_databaseId]);
 			
-			Format(sClusterInsert, sizeof(sClusterInsert), "%d", zoneData[ZD_databaseId]);
+			Format(sZoneInsert, sizeof(sZoneInsert), "%d", zoneData[ZD_databaseId]);
 		}
 		SQL_AddQuery(hTransaction, sQuery);
 		
@@ -4057,7 +4057,7 @@ SaveZoneGroupToDatabase(group[ZoneGroup])
 		// Have to remove all kv first
 		// This is much easier than tracking which key got deleted.
 		// TODO: Optimize to only update changed ones.
-		Format(sQuery, sizeof(sQuery), "DELETE FROM `%sscustom_zones_keyvalues` WHERE zone_id = %d", g_sTablePrefix, zoneData[ZD_databaseId]);
+		Format(sQuery, sizeof(sQuery), "DELETE FROM `%scustom_zone_keyvalues` WHERE zone_id = %d", g_sTablePrefix, zoneData[ZD_databaseId]);
 		SQL_AddQuery(hTransaction, sQuery);
 		
 		hTrieSnapshot = CreateTrieSnapshot(zoneData[ZD_customKV]);
@@ -4068,7 +4068,7 @@ SaveZoneGroupToDatabase(group[ZoneGroup])
 			GetTrieString(zoneData[ZD_customKV], sKey, sValue, sizeof(sValue));
 			SQL_EscapeString(g_hDatabase, sKey, sEscapedKey, sizeof(sEscapedKey));
 			SQL_EscapeString(g_hDatabase, sValue, sEscapedValue, sizeof(sEscapedValue));
-			Format(sQuery, sizeof(sQuery), "INSERT INTO `%sscustom_zones_keyvalues` (zone_id, setting, val) VALUES (%s, '%s', '%s')", g_sTablePrefix, sZoneInsert, sEscapedKey, sEscapedValue);
+			Format(sQuery, sizeof(sQuery), "INSERT INTO `%scustom_zone_keyvalues` (zone_id, setting, val) VALUES (%s, '%s', '%s')", g_sTablePrefix, sZoneInsert, sEscapedKey, sEscapedValue);
 			SQL_AddQuery(hTransaction, sQuery);
 		}
 		CloseHandle(hTrieSnapshot);
