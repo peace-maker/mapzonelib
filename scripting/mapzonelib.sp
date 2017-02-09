@@ -110,6 +110,8 @@ new Handle:g_hCVTablePrefix;
 
 new Handle:g_hfwdOnEnterForward;
 new Handle:g_hfwdOnLeaveForward;
+new Handle:g_hfwdOnCreatedForward;
+new Handle:g_hfwdOnRemovedForward;
 
 // Displaying of zones using laser beams
 new Handle:g_hShowZonesTimer;
@@ -175,6 +177,10 @@ public OnPluginStart()
 	g_hfwdOnEnterForward = CreateGlobalForward("MapZone_OnClientEnterZone", ET_Ignore, Param_Cell, Param_String, Param_String);
 	// forward MapZone_OnClientLeaveZone(client, const String:sZoneGroup[], const String:sZoneName[]);
 	g_hfwdOnLeaveForward = CreateGlobalForward("MapZone_OnClientLeaveZone", ET_Ignore, Param_Cell, Param_String, Param_String);
+	// forward MapZone_OnZoneCreated(const String:sZoneGroup[], const String:sZoneName[], ZoneType:type, iCreator);
+	g_hfwdOnCreatedForward = CreateGlobalForward("MapZone_OnZoneCreated", ET_Ignore, Param_String, Param_String, Param_Cell, Param_Cell);
+	// forward MapZone_OnZoneRemoved(const String:sZoneGroup[], const String:sZoneName[], ZoneType:type, iRemover);
+	g_hfwdOnRemovedForward = CreateGlobalForward("MapZone_OnZoneRemoved", ET_Ignore, Param_String, Param_String, Param_Cell, Param_Cell);
 	g_hZoneGroups = CreateArray(_:ZoneGroup);
 	
 	LoadTranslations("common.phrases");
@@ -547,6 +553,10 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 			g_ClientMenuState[client][CMS_cluster] = zoneCluster[ZC_index];
 			DisplayClusterEditMenu(client);
 		}
+		
+		// Inform other plugins that this cluster is now a thing.
+		CallOnClusterCreated(group, zoneCluster, client);
+		
 		return Plugin_Handled;
 	}
 	return Plugin_Continue;
@@ -2308,11 +2318,19 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 				zoneData[ZD_clusterIndex] = -1;
 			}
 			SaveZone(group, zoneData);
+			
+			// Inform other plugins that this zone is now "created" on it's own.
+			if (!bDeleteZones)
+				CallOnZoneCreated(group, zoneData, param1);
+			
 			iZonesCount++;
 		}
 		
 		g_ClientMenuState[param1][CMS_cluster] = -1;
 		DisplayClusterListMenu(param1);
+		
+		// Inform other plugins that this cluster is now history.
+		CallOnClusterRemoved(group, zoneCluster, param1);
 		
 		if(bDeleteZones)
 			LogAction(param1, -1, "%L deleted cluster \"%s\" and %d contained zones from group \"%s\".", param1, zoneCluster[ZC_name], iZonesCount, group[ZG_name]);
@@ -2703,6 +2721,9 @@ public Panel_HandleConfirmRemoveFromCluster(Handle:menu, MenuAction:action, para
 			zoneData[ZD_clusterIndex] = -1;
 			SaveZone(group, zoneData);
 			
+			// Inform other plugins that this zone is now on its own.
+			CallOnZoneCreated(group, zoneData, param1);
+			
 			LogAction(param1, -1, "%L removed zone \"%s\" from cluster \"%s\" in group \"%s\".", param1, zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
 		}
 		
@@ -2733,6 +2754,8 @@ public Panel_HandleConfirmDeleteZone(Handle:menu, MenuAction:action, param1, par
 			RemoveZoneTrigger(group, zoneData);
 			g_ClientMenuState[param1][CMS_zone] = -1;
 			
+			// Inform other plugins that this zone is no more.
+			CallOnZoneRemoved(group, zoneData, param1);
 			
 			if(g_ClientMenuState[param1][CMS_cluster] == -1)
 			{
@@ -3365,6 +3388,10 @@ bool:LoadZoneGroup(group[ZoneGroup])
 	} while(KvGotoNextKey(hKV));
 	
 	CloseHandle(hKV);
+	
+	// Inform all other plugins that these zones and clusters exist now.
+	CallOnCreatedForAllInGroup(group);
+	
 	return true;
 }
 
@@ -3873,6 +3900,9 @@ public SQL_GetZoneKeyValues(Handle:owner, Handle:hndl, const String:error[], any
 	
 	// Spawn the trigger_multiples for all zones
 	SetupGroupZones(group);
+	
+	// Inform other plugins that all the zones and clusters of this group are here now.
+	CallOnCreatedForAllInGroup(group);
 }
 
 public SQL_LogError(Handle:owner, Handle:hndl, const String:error[], any:data)
@@ -4521,6 +4551,79 @@ RemoveClientFromAllZones(client)
 	}
 }
 
+CallOnCreatedForAllInGroup(group[ZoneGroup])
+{
+	// Inform other plugins that these clusters are there now.
+	new iSize = GetArraySize(group[ZG_cluster]);
+	new zoneCluster[ZoneCluster];
+	for (new i=0; i<iSize; i++)
+	{
+		GetZoneClusterByIndex(i, group, zoneCluster);
+		if (zoneCluster[ZC_deleted])
+			continue;
+		
+		CallOnClusterCreated(group, zoneCluster);
+	}
+	
+	// And all these zones too.
+	iSize = GetArraySize(group[ZG_zones]);
+	new zoneData[ZoneData];
+	for (new i=0; i<iSize; i++)
+	{
+		GetZoneByIndex(i, group, zoneData);
+		if (zoneData[ZD_deleted])
+			continue;
+		
+		// Don't fire the forward for zones in a cluster.
+		if (zoneData[ZD_clusterIndex] != -1)
+			continue;
+		
+		CallOnZoneCreated(group, zoneData);
+	}
+}
+
+// The creator defaults to 0 if the zone has been loaded from the config or database.
+CallOnZoneCreated(group[ZoneGroup], zoneData[ZoneData], iCreator=0)
+{
+	Call_StartForward(g_hfwdOnCreatedForward);
+	Call_PushString(group[ZG_name]);
+	Call_PushString(zoneData[ZD_name]);
+	Call_PushCell(MapZoneType_Zone);
+	Call_PushCell(iCreator);
+	Call_Finish();
+}
+
+// The creator defaults to 0 if the zone has been loaded from the config or database.
+CallOnClusterCreated(group[ZoneGroup], zoneCluster[ZoneCluster], iCreator=0)
+{
+	Call_StartForward(g_hfwdOnCreatedForward);
+	Call_PushString(group[ZG_name]);
+	Call_PushString(zoneCluster[ZC_name]);
+	Call_PushCell(MapZoneType_Cluster);
+	Call_PushCell(iCreator);
+	Call_Finish();
+}
+
+CallOnZoneRemoved(group[ZoneGroup], zoneData[ZoneData], iDeleter)
+{
+	Call_StartForward(g_hfwdOnRemovedForward);
+	Call_PushString(group[ZG_name]);
+	Call_PushString(zoneData[ZD_name]);
+	Call_PushCell(MapZoneType_Zone);
+	Call_PushCell(iDeleter);
+	Call_Finish();
+}
+
+CallOnClusterRemoved(group[ZoneGroup], zoneCluster[ZoneCluster], iDeleter)
+{
+	Call_StartForward(g_hfwdOnRemovedForward);
+	Call_PushString(group[ZG_name]);
+	Call_PushString(zoneCluster[ZC_name]);
+	Call_PushCell(MapZoneType_Cluster);
+	Call_PushCell(iDeleter);
+	Call_Finish();
+}
+
 /**
  * Zone adding
  */
@@ -4896,6 +4999,9 @@ SaveNewZone(client, const String:sName[])
 	// Create the trigger.
 	if(!SetupZone(group, zoneData))
 		PrintToChat(client, "Map Zones > Error creating trigger for new zone.");
+	
+	// Inform other plugins that this zone is here now.
+	CallOnZoneCreated(group, zoneData, client);
 	
 	// Edit the new zone right away.
 	g_ClientMenuState[client][CMS_zone] = zoneData[ZD_index];

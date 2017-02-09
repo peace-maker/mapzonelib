@@ -14,6 +14,15 @@
 #define MAX_ZONE_NAME 64
 
 /**
+ * If the zone is composed out of several zones or stands alone.
+ */
+enum MapZoneType
+{
+	MapZoneType_Zone,
+	MapZoneType_Cluster
+};
+
+/**
  * Register a new group of zones.
  * Zones created in this group will be saved in a 
  * seperate folder in "configs/mapzonelib/<group>/mapname.zones".
@@ -199,6 +208,38 @@ forward MapZone_OnClientEnterZone(client, const String:sZoneGroup[], const Strin
  * @noreturn
  */
 forward MapZone_OnClientLeaveZone(client, const String:sZoneGroup[], const String:sZoneName[]);
+
+
+/**
+ * Called when a zone or cluster was created on the map.
+ * This is called for every zone when loading the zones from the configs or database.
+ * Zones in a cluster don't get mentioned in this forward, but only the cluster they are in.
+ * When removing a zone from a cluster this forward gets called with the - now - standalone zone.
+ *
+ * @param sZoneGroup  The name of the group the zone was created in.
+ * @param sZoneName   The name of the zone.
+ * @param type        The type of the zone (Zone or Cluster).
+ * @param iCreator    The client index of the user who created that zone or 0 if it has been loaded from elsewhere.
+ * @noreturn
+ */
+forward MapZone_OnZoneCreated(const String:sZoneGroup[], const String:sZoneName[], MapZoneType:type, iCreator);
+
+
+/**
+ * Called when a zone or cluster was removed from the map.
+ * When removing a cluster including the contained zones, this only fires for the cluster
+ * and not for every single contained zone.
+ *
+ * This gets called for the zone which just got assigned to a cluster too,
+ * since it's no longer there on its own.
+ *
+ * @param sZoneGroup  The name of the group the zone was removed from.
+ * @param sZoneName   The name of the zone.
+ * @param type        The type of the zone (Zone or Cluster).
+ * @param iCreator    The client index of the user who removed that zone.
+ * @noreturn
+ */
+forward MapZone_OnZoneRemoved(const String:sZoneGroup[], const String:sZoneName[], MapZoneType:type, iRemover);
 
 public SharedPlugin:__pl_mapzonelib = 
 {
