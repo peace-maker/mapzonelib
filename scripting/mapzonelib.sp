@@ -2296,6 +2296,9 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 		
 		new bool:bDeleteZones = param2 == 1;
 		
+		// Inform other plugins that this cluster is now history.
+		CallOnClusterRemoved(group, zoneCluster, param1);
+		
 		// We can't really delete it, because the array indicies would shift. Just don't save it to file and skip it.
 		zoneCluster[ZC_deleted] = true;
 		SaveCluster(group, zoneCluster);
@@ -2337,9 +2340,6 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 		
 		g_ClientMenuState[param1][CMS_cluster] = -1;
 		DisplayClusterListMenu(param1);
-		
-		// Inform other plugins that this cluster is now history.
-		CallOnClusterRemoved(group, zoneCluster, param1);
 		
 		if(bDeleteZones)
 			LogAction(param1, -1, "%L deleted cluster \"%s\" and %d contained zones from group \"%s\".", param1, zoneCluster[ZC_name], iZonesCount, group[ZG_name]);
@@ -2784,14 +2784,15 @@ public Panel_HandleConfirmDeleteZone(Handle:menu, MenuAction:action, param1, par
 			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 			GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
 			
+			// Inform other plugins that this zone is no more.
+			// Do it before marking it as deleted, so the plugins can still access its properties.
+			CallOnZoneRemoved(group, zoneData, param1);
+			
 			// We can't really delete it, because the array indicies would shift. Just don't save it to file and skip it.
 			zoneData[ZD_deleted] = true;
 			SaveZone(group, zoneData);
 			RemoveZoneTrigger(group, zoneData);
 			g_ClientMenuState[param1][CMS_zone] = -1;
-			
-			// Inform other plugins that this zone is no more.
-			CallOnZoneRemoved(group, zoneData, param1);
 			
 			if(g_ClientMenuState[param1][CMS_cluster] == -1)
 			{
