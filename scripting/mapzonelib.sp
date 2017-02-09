@@ -164,7 +164,7 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 	CreateNative("MapZone_SetClientZoneVisibility", Native_SetClientZoneVisibility);
 	CreateNative("MapZone_ZoneExists", Native_ZoneExists);
 	CreateNative("MapZone_GetGroupZones", Native_GetGroupZones);
-	CreateNative("MapZone_IsClusteredZone", Native_IsClusteredZone);
+	CreateNative("MapZone_GetZoneType", Native_GetZoneType);
 	CreateNative("MapZone_GetClusterZones", Native_GetClusterZones);
 	CreateNative("MapZone_GetCustomString", Native_GetCustomString);
 	CreateNative("MapZone_SetCustomString", Native_SetCustomString);
@@ -1135,8 +1135,8 @@ public Native_GetGroupZones(Handle:plugin, numParams)
 	return _:hReturn;
 }
 
-// native bool:MapZone_IsClusteredZone(const String:group[], const String:zoneName[]);
-public Native_IsClusteredZone(Handle:plugin, numParams)
+// native MapZoneType:MapZone_GetZoneType(const String:group[], const String:zoneName[]);
+public Native_GetZoneType(Handle:plugin, numParams)
 {
 	new String:sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sGroupName, sizeof(sGroupName));
@@ -1146,12 +1146,18 @@ public Native_IsClusteredZone(Handle:plugin, numParams)
 	
 	new group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
-		return false;
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid group name \"%s\"", sGroupName);
+		return 0;
+	}
 	
 	if(ClusterExistsWithName(group, sZoneName))
-		return true;
+		return _:MapZoneType_Cluster;
+	else if(ZoneExistsWithName(group, sZoneName))
+		return _:MapZoneType_Zone;
 	
-	return false;
+	ThrowNativeError(SP_ERROR_NATIVE, "No zone or cluster with name \"%s\" in group \"%s\".", sZoneName, sGroupName);
+	return 0;
 }
 
 // native Handle:MapZone_GetClusterZones(const String:group[], const String:clusterName[]);

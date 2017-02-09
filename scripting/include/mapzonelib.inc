@@ -151,13 +151,26 @@ native bool:MapZone_ZoneExists(const String:group[], const String:zoneName[]);
 native Handle:MapZone_GetGroupZones(const String:group[], bool:bIncludeClusters=true);
 
 /**
+ * Get the type of the zone. Clustered or standalone zone.
+ *
+ * @param group     The zone group name.
+ * @param zoneName  The zone or cluster name.
+ * @return          The MapZoneType. Standalone zone or cluster?
+ * @error           Invalid group or zone name.
+ */
+native MapZoneType:MapZone_GetZoneType(const String:group[], const String:zoneName[]);
+
+/**
  * Check if a zone is made of several smaller zones.
  *
  * @param group    The zone group name.
  * @param zoneName The name of the zone to check for clustering.
  * @return         True if zone is a cluster, false otherwise.
  */
-native bool:MapZone_IsClusteredZone(const String:group[], const String:zoneName[]);
+stock bool:MapZone_IsClusteredZone(const String:group[], const String:zoneName[])
+{
+	return MapZone_GetZoneType(group, zoneName) == MapZoneType_Cluster;
+}
 
 /**
  * Get an adt_array of zone names of zones in this cluster.
@@ -271,7 +284,7 @@ public __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_SetZoneColor");
 	MarkNativeAsOptional("MapZone_ZoneExists");
 	MarkNativeAsOptional("MapZone_GetGroupZones");
-	MarkNativeAsOptional("MapZone_IsClusteredZone");
+	MarkNativeAsOptional("MapZone_GetZoneType");
 	MarkNativeAsOptional("MapZone_GetClusterZones");
 	MarkNativeAsOptional("MapZone_GetCustomString");
 	MarkNativeAsOptional("MapZone_SetCustomString");
