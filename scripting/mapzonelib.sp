@@ -3909,7 +3909,7 @@ public SQL_GetZones(Handle:owner, Handle:hndl, const String:error[], any:data)
 	while (SQL_FetchRow(hndl))
 	{
 		zoneData[ZD_databaseId] = SQL_FetchInt(hndl, 0);
-		zoneData[ZD_clusterIndex] = FindValueInArray(group[ZG_cluster], SQL_FetchInt(hndl, 1), _:ZC_index);
+		zoneData[ZD_clusterIndex] = FindValueInArray(group[ZG_cluster], SQL_FetchInt(hndl, 1), _:ZC_databaseId);
 		SQL_FetchString(hndl, 2, zoneData[ZD_name], MAX_ZONE_NAME);
 		for (new i=0; i<3; i++)
 		{
@@ -4069,14 +4069,14 @@ SaveZoneGroupToDatabase(group[ZoneGroup])
 		{
 			Format(sQuery, sizeof(sQuery), "UPDATE `%sclusters` SET name = '%s', team = %d, color = %d WHERE id = %d", g_sTablePrefix, sEscapedZoneName, zoneCluster[ZC_teamFilter], iColor, zoneCluster[ZC_databaseId]);
 			// Remember how to reference this cluster for the custom key values.
-			Format(sClusterInsert, sizeof(sClusterInsert), "%s", zoneCluster[ZC_databaseId]);
+			Format(sClusterInsert, sizeof(sClusterInsert), "%d", zoneCluster[ZC_databaseId]);
 		}
 		// Or insert a new one.
 		else
 		{
-			Format(sQuery, sizeof(sQuery), "INSERT INTO `%sclusters` (groupname, map, name, team, color) VALUES (%s, %s, %s, %d, %d)", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName, zoneCluster[ZC_teamFilter], iColor);
+			Format(sQuery, sizeof(sQuery), "INSERT INTO `%sclusters` (groupname, map, name, team, color) VALUES ('%s', '%s', '%s', %d, %d)", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName, zoneCluster[ZC_teamFilter], iColor);
 			// This cluster isn't in the database yet, so we need to fetch the id after it got inserted for the custom keyvalues.
-			Format(sClusterInsert, sizeof(sClusterInsert), "(SELECT id FROM `%scluster` WHERE groupname = '%s' AND map = '%s' AND name = '%s')", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName);
+			Format(sClusterInsert, sizeof(sClusterInsert), "(SELECT id FROM `%sclusters` WHERE groupname = '%s' AND map = '%s' AND name = '%s')", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName);
 		}
 		SQL_AddQuery(hTransaction, sQuery);
 		
@@ -4135,11 +4135,11 @@ SaveZoneGroupToDatabase(group[ZoneGroup])
 			{
 				// Find the previously inserted cluster id.
 				SQL_EscapeString(g_hDatabase, zoneCluster[ZC_name], sEscapedZoneName, sizeof(sEscapedZoneName));
-				Format(sClusterInsert, sizeof(sClusterInsert), "(SELECT id FROM `%scluster` WHERE groupname = '%s' AND map = '%s' AND name = '%s')", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName);
+				Format(sClusterInsert, sizeof(sClusterInsert), "(SELECT id FROM `%sclusters` WHERE groupname = '%s' AND map = '%s' AND name = '%s')", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName);
 			}
 			else
 			{
-				Format(sClusterInsert, sizeof(sClusterInsert), "%s", zoneCluster[ZC_databaseId]);
+				Format(sClusterInsert, sizeof(sClusterInsert), "%d", zoneCluster[ZC_databaseId]);
 			}
 		}
 		// This zone doesn't blong to any cluster.
