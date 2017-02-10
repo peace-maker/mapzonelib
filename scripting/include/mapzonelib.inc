@@ -224,6 +224,16 @@ native Handle:MapZone_GetClusterZones(const String:group[], const String:cluster
 native bool:MapZone_SetZoneName(const String:group[], const String:sOldName[], const String:sNewName[]);
 
 /**
+ * Get the center position of a zone.
+ *
+ * @param group     The zone group name.
+ * @param zoneName  The name of the zone.
+ * @param fCenter   Buffer to store center coordinates in.
+ * @error           Invalid group or zone name.
+ */
+native MapZone_GetZonePosition(const String:group[], const String:sZoneName[], Float:fCenter[3]);
+
+/**
  * Get the value of a custom key for a zone or cluster.
  *
  * @param group		The zone group name.
@@ -328,6 +338,7 @@ public __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_GetZoneType");
 	MarkNativeAsOptional("MapZone_GetClusterZones");
 	MarkNativeAsOptional("MapZone_SetZoneName");
+	MarkNativeAsOptional("MapZone_GetZonePosition");
 	MarkNativeAsOptional("MapZone_GetCustomString");
 	MarkNativeAsOptional("MapZone_SetCustomString");
 }

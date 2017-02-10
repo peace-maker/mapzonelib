@@ -169,6 +169,7 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 	CreateNative("MapZone_GetZoneType", Native_GetZoneType);
 	CreateNative("MapZone_GetClusterZones", Native_GetClusterZones);
 	CreateNative("MapZone_SetZoneName", Native_SetZoneName);
+	CreateNative("MapZone_GetZonePosition", Native_GetZonePosition);
 	CreateNative("MapZone_GetCustomString", Native_GetCustomString);
 	CreateNative("MapZone_SetCustomString", Native_SetCustomString);
 	RegPluginLibrary("mapzonelib");
@@ -1347,6 +1348,42 @@ public Native_SetZoneName(Handle:plugin, numParams)
 	}
 	
 	return true;
+}
+
+// native MapZone_GetZonePosition(const String:group[], const String:sZoneName[], Float:fCenter[3]);
+public Native_GetZonePosition(Handle:plugin, numParams)
+{
+	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	new String:sZoneName[MAX_ZONE_NAME];
+	GetNativeString(2, sZoneName, sizeof(sZoneName));
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid group name \"%s\"", sGroupName);
+		return;
+	}
+	
+	// Get the center position of the zone or cluster.
+	new Float:fCenter[3];
+	new zoneData[ZoneData];
+	if (GetZoneByName(sZoneName, group, zoneData))
+	{
+		Array_Copy(zoneData[ZD_position], fCenter, sizeof(fCenter));
+	}
+	/*else if (GetZoneClusterByName(sZoneName, group, zoneCluster))
+	{
+		// TODO: Pick a zone in the cluster?
+	}*/
+	else
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "No zone with name \"%s\" in group \"%s\".", sZoneName, sGroupName);
+		return;
+	}
+	
+	SetNativeArray(3, fCenter, 3);
 }
 
 // native bool:MapZone_GetCustomString(const String:group[], const String:zoneName[], const String:key[], String:value[], maxlen);
