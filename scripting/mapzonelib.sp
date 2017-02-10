@@ -3694,7 +3694,7 @@ bool:SaveZoneGroupToFile(group[ZoneGroup])
 
 bool:CreateZoneSectionsInKV(Handle:hKV, group[ZoneGroup], iClusterIndex)
 {
-	new String:sIndex[16], zoneData[ZoneData], Float:vBuf[3];
+	new String:sIndex[16], zoneData[ZoneData], Float:vBuf[3], String:sColor[64];
 	new iSize = GetArraySize(group[ZG_zones]);
 	new bool:bZonesAdded, iIndex;
 	for(new i=0;i<iSize;i++)
@@ -3723,7 +3723,11 @@ bool:CreateZoneSectionsInKV(Handle:hKV, group[ZoneGroup], iClusterIndex)
 		KvSetNum(hKV, "team", zoneData[ZD_teamFilter]);
 		// Only set the color to the KV if it was set.
 		if (zoneData[ZD_color][0] >= 0)
-			KvSetColor(hKV, "color", zoneData[ZD_color][0], zoneData[ZD_color][1], zoneData[ZD_color][2], zoneData[ZD_color][3]);
+		{
+			Format(sColor, sizeof(sColor), "%d %d %d %d", zoneData[ZD_color][0], zoneData[ZD_color][1], zoneData[ZD_color][2], zoneData[ZD_color][3]);
+			// KvSetColor isn't implemented in the SDK when saving to file.
+			KvSetString(hKV, "color", sColor);
+		}
 		KvSetString(hKV, "name", zoneData[ZD_name]);
 		
 		AddCustomKeyValues(hKV, zoneData[ZD_customKV]);
