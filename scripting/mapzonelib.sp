@@ -800,6 +800,8 @@ public Native_RegisterZoneGroup(Handle:plugin, numParams)
 	// Default to red color.
 	group[ZG_defaultColor][0] = 255;
 	group[ZG_defaultColor][3] = 255;
+	group[ZG_index] = GetArraySize(g_hZoneGroups);
+	PushArrayArray(g_hZoneGroups, group[0], _:ZoneGroup);
 	
 	// Load the zone details
 	if (g_hDatabase)
@@ -808,9 +810,6 @@ public Native_RegisterZoneGroup(Handle:plugin, numParams)
 	// The zones for this group will be loaded once the database connected.
 	else if (!g_bConnectingToDatabase)
 		LoadZoneGroup(group);
-	
-	group[ZG_index] = GetArraySize(g_hZoneGroups);
-	PushArrayArray(g_hZoneGroups, group[0], _:ZoneGroup);
 }
 
 // native bool:MapZone_ShowMenu(client, const String:group[]);
