@@ -213,6 +213,17 @@ stock bool:MapZone_IsClusteredZone(const String:group[], const String:zoneName[]
 native Handle:MapZone_GetClusterZones(const String:group[], const String:clusterName[]);
 
 /**
+ * Changes the name of a zone or cluster.
+ *
+ * @param group     The zone group name.
+ * @param sOldName  The current name of the zone or cluster.
+ * @param sNewName  The new name to change to.
+ * @return          True if name was changed, false if there already is a zone or cluster with the new name.
+ * @error           Invalid group or zone name.
+ */
+native bool:MapZone_SetZoneName(const String:group[], const String:sOldName[], const String:sNewName[]);
+
+/**
  * Get the value of a custom key for a zone or cluster.
  *
  * @param group		The zone group name.
@@ -316,6 +327,7 @@ public __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_GetGroupZones");
 	MarkNativeAsOptional("MapZone_GetZoneType");
 	MarkNativeAsOptional("MapZone_GetClusterZones");
+	MarkNativeAsOptional("MapZone_SetZoneName");
 	MarkNativeAsOptional("MapZone_GetCustomString");
 	MarkNativeAsOptional("MapZone_SetCustomString");
 }

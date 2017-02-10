@@ -168,6 +168,7 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 	CreateNative("MapZone_GetGroupZones", Native_GetGroupZones);
 	CreateNative("MapZone_GetZoneType", Native_GetZoneType);
 	CreateNative("MapZone_GetClusterZones", Native_GetClusterZones);
+	CreateNative("MapZone_SetZoneName", Native_SetZoneName);
 	CreateNative("MapZone_GetCustomString", Native_GetCustomString);
 	CreateNative("MapZone_SetCustomString", Native_SetCustomString);
 	RegPluginLibrary("mapzonelib");
@@ -1292,6 +1293,60 @@ public Native_GetClusterZones(Handle:plugin, numParams)
 	CloseHandle(hZones);
 	
 	return _:hReturn;
+}
+
+// native bool:MapZone_SetZoneName(const String:group[], const String:sOldName[], const String:sNewName[]);
+public Native_SetZoneName(Handle:plugin, numParams)
+{
+	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	new String:sCurrentName[MAX_ZONE_NAME];
+	GetNativeString(2, sCurrentName, sizeof(sCurrentName));
+	
+	new String:sNewName[MAX_ZONE_NAME];
+	GetNativeString(3, sNewName, sizeof(sNewName));
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid group name \"%s\"", sGroupName);
+		return false;
+	}
+	
+	// Get the data structure of the zone by the old name.
+	new MapZoneType:iZoneType;
+	new zoneData[ZoneData], zoneCluster[ZoneCluster];
+	if (GetZoneByName(sCurrentName, group, zoneData))
+	{
+		iZoneType = MapZoneType_Zone;
+	}
+	else if (GetZoneClusterByName(sCurrentName, group, zoneCluster))
+	{
+		iZoneType = MapZoneType_Cluster;
+	}
+	else
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "No zone or cluster with name \"%s\" in group \"%s\".", sCurrentName, sGroupName);
+		return false;
+	}
+	
+	// Make sure there is no other zone named by the new name.
+	if(ZoneExistsWithName(group, sNewName) || ClusterExistsWithName(group, sNewName))
+		return false;
+	
+	if (iZoneType == MapZoneType_Zone)
+	{
+		strcopy(zoneData[ZD_name], MAX_ZONE_NAME, sNewName);
+		SaveZone(group, zoneData);
+	}
+	else
+	{
+		strcopy(zoneCluster[ZC_name], MAX_ZONE_NAME, sNewName);
+		SaveCluster(group, zoneCluster);
+	}
+	
+	return true;
 }
 
 // native bool:MapZone_GetCustomString(const String:group[], const String:zoneName[], const String:key[], String:value[], maxlen);
