@@ -4967,7 +4967,8 @@ HandleZonePositionSetting(client, const Float:fOrigin[3])
 				new bool:bPresetName = g_ClientMenuState[client][CMS_presetZoneName][0] != 0;
 				
 				// There is a name already given for this zone. use it.
-				if (!ZoneExistsWithName(group, g_ClientMenuState[client][CMS_presetZoneName])
+				if (bPresetName
+				&& !ZoneExistsWithName(group, g_ClientMenuState[client][CMS_presetZoneName])
 				&& !ClusterExistsWithName(group, g_ClientMenuState[client][CMS_presetZoneName]))
 				{
 					SaveNewZone(client, g_ClientMenuState[client][CMS_presetZoneName]);
