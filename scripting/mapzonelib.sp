@@ -1016,7 +1016,7 @@ public Native_SetMenuCancelAction(Handle:plugin, numParams)
 	return true;
 }
 
-// native MapZone_StartAddingZone(client, const String:group[], const String:sZoneName[] = "");
+// native MapZone_StartAddingZone(client, const String:group[], const String:sZoneName[] = "", bool:bEnableCancelForward = false, const String:sClusterName[] = "");
 public Native_StartAddingZone(Handle:plugin, numParams)
 {
 	new client = GetNativeCell(1);
@@ -1051,6 +1051,21 @@ public Native_StartAddingZone(Handle:plugin, numParams)
 	}
 	
 	new bool:bEnableCancelForward = bool:GetNativeCell(4);
+	new String:sClusterName[MAX_ZONE_NAME];
+	GetNativeString(5, sClusterName, sizeof(sClusterName));
+	
+	// If there is a cluster name provided, add the new zone to that right away.
+	if (sClusterName[0])
+	{
+		new zoneCluster[ZoneCluster];
+		if (!GetZoneClusterByName(sClusterName, group, zoneCluster))
+		{
+			ThrowNativeError(SP_ERROR_NATIVE, "Invalid cluster name \"%s\"", sClusterName);
+			return;
+		}
+		
+		g_ClientMenuState[client][CMS_cluster] = zoneCluster[ZC_index];
+	}
 	
 	// Save the zone name if there's one given.
 	strcopy(g_ClientMenuState[client][CMS_presetZoneName], MAX_ZONE_NAME, sZoneName);
@@ -2321,6 +2336,13 @@ DisplayClusterEditMenu(client)
 	if(zoneCluster[ZC_deleted])
 	{
 		g_ClientMenuState[client][CMS_cluster] = -1;
+		// Don't open our own menus when we're told to call the menu cancel forward.
+		if (TryCallMenuCancelForward(client, MenuCancel_ExitBack))
+		{
+			g_ClientMenuState[client][CMS_group] = -1;
+			return;
+		}
+		
 		DisplayClusterListMenu(client);
 		return;
 	}
@@ -2492,6 +2514,14 @@ public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
 	else if(action == MenuAction_Cancel)
 	{
 		g_ClientMenuState[param1][CMS_cluster] = -1;
+		
+		// Don't open our own menus when we're told to call the menu cancel forward.
+		if (TryCallMenuCancelForward(param1, param2))
+		{
+			g_ClientMenuState[param1][CMS_group] = -1;
+			return;
+		}
+		
 		if(param2 == MenuCancel_ExitBack)
 		{
 			DisplayClusterListMenu(param1);
@@ -2563,6 +2593,13 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 		}
 		
 		g_ClientMenuState[param1][CMS_cluster] = -1;
+		// Don't open our own menu if we're told to call the menu cancel callback.
+		if (TryCallMenuCancelForward(param1, MenuCancel_ExitBack))
+		{
+			g_ClientMenuState[param1][CMS_group] = -1;
+			return;
+		}
+		
 		DisplayClusterListMenu(param1);
 		
 		if(bDeleteZones)
@@ -2749,6 +2786,14 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 	{
 		g_ClientMenuState[param1][CMS_zone] = -1;
 		
+		// If this zone is in a cluster, always go back to the cluster edit menu.
+		if(param2 == MenuCancel_ExitBack
+		&& g_ClientMenuState[param1][CMS_cluster] != -1)
+		{
+			DisplayClusterEditMenu(param1);
+			return;
+		}
+		
 		// Don't open our own menus when we're told to call the menu cancel forward.
 		if (TryCallMenuCancelForward(param1, param2))
 		{
@@ -2759,10 +2804,7 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 		
 		if(param2 == MenuCancel_ExitBack)
 		{
-			if(g_ClientMenuState[param1][CMS_cluster] != -1)
-				DisplayClusterEditMenu(param1);
-			else
-				DisplayZoneListMenu(param1);
+			DisplayZoneListMenu(param1);
 		}
 		else
 		{

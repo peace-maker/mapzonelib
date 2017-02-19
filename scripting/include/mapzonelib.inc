@@ -96,16 +96,18 @@ native MapZone_AddCluster(const String:group[], const String:sClusterName[]);
  * Start adding a zone in a zone group. Opens the edit menu afterwards.
  * The name can optionally already be provided, so the user skips the naming.
  *
- * @param client    The client index.
- * @param group     The zone group name.
- * @param zoneName  Optional: The name of the new zone.
+ * @param client                The client index.
+ * @param group                 The zone group name.
+ * @param zoneName              Optional: The name of the new zone.
  * @param bEnableCancelForward  Call the menu cancel forward when aborting the add or going 
  *                              back from the edit menu instead of the zone list?
  *                              Ignored if no menu cancel callback registered.
  *                              @see MapZone_SetMenuCancelAction
+ * @param sClusterName          Optional: The name of the cluster this zone should be added to.
  * @noreturn
+ * @error                       Invalid group name, zone name already taken, invalid client index, invalid cluster name.
  */
-native MapZone_StartAddingZone(client, const String:group[], const String:sZoneName[] = "", bool:bEnableCancelForward = false);
+native MapZone_StartAddingZone(client, const String:group[], const String:sZoneName[] = "", bool:bEnableCancelForward = false, const String:sClusterName[] = "");
 
 /**
  * Set the default color of the zone beams for this group.
