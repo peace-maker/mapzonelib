@@ -1238,7 +1238,7 @@ public Native_GetGroupZones(Handle:plugin, numParams)
 		if(zoneData[ZD_clusterIndex] != -1)
 			continue;
 		
-		PushArrayArray(hZones, _:zoneData[ZD_name], ByteCountToCells(MAX_ZONE_NAME));
+		PushArrayString(hZones, zoneData[ZD_name]);
 	}
 	
 	// Only add clusters, if we're told so.
@@ -1253,7 +1253,7 @@ public Native_GetGroupZones(Handle:plugin, numParams)
 			if(zoneCluster[ZC_deleted])
 				continue;
 			
-			PushArrayArray(hZones, _:zoneCluster[ZC_name], ByteCountToCells(MAX_ZONE_NAME));
+			PushArrayString(hZones, zoneCluster[ZC_name]);
 		}
 	}
 	
