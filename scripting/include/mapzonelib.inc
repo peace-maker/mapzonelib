@@ -83,6 +83,16 @@ functag public MapZoneMenuCancelCB(client, reason, const String:group[]);
 native bool:MapZone_SetMenuCancelAction(const String:group[], MapZoneMenuCancelCB:callback);
 
 /**
+ * Add a new cluster to that zone group.
+ *
+ * @param group         The zone group name.
+ * @param sClusterName  The name of the new cluster.
+ * @noreturn
+ * @error               There already exists a zone or cluster with that name.
+ */
+native MapZone_AddCluster(const String:group[], const String:sClusterName[]);
+
+/**
  * Start adding a zone in a zone group. Opens the edit menu afterwards.
  * The name can optionally already be provided, so the user skips the naming.
  *
@@ -329,6 +339,7 @@ public __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_ShowZoneEditMenu");
 	MarkNativeAsOptional("MapZone_SetMenuCancelAction");
 	MarkNativeAsOptional("MapZone_StartAddingZone");
+	MarkNativeAsOptional("MapZone_AddCluster");
 	MarkNativeAsOptional("MapZone_SetZoneDefaultColor");
 	MarkNativeAsOptional("MapZone_SetZoneColor");
 	MarkNativeAsOptional("MapZone_GetZoneIndex");

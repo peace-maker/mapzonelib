@@ -159,6 +159,7 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 	CreateNative("MapZone_ShowZoneEditMenu", Native_ShowZoneEditMenu);
 	CreateNative("MapZone_SetMenuCancelAction", Native_SetMenuCancelAction);
 	CreateNative("MapZone_StartAddingZone", Native_StartAddingZone);
+	CreateNative("MapZone_AddCluster", Native_AddCluster);
 	CreateNative("MapZone_SetZoneDefaultColor", Native_SetZoneDefaultColor);
 	CreateNative("MapZone_SetZoneColor", Native_SetZoneColor);
 	CreateNative("MapZone_SetClientZoneVisibility", Native_SetClientZoneVisibility);
@@ -534,12 +535,7 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 		g_ClientMenuState[client][CMS_addCluster] = false;
 		
 		new zoneCluster[ZoneCluster];
-		strcopy(zoneCluster[ZC_name], MAX_ZONE_NAME, sArgs);
-		// Don't use a seperate color for this cluster by default.
-		zoneCluster[ZC_color][0] = -1;
-		zoneCluster[ZC_index] = GetArraySize(group[ZG_cluster]);
-		PushArrayArray(group[ZG_cluster], zoneCluster[0], _:ZoneCluster);
-		
+		AddNewCluster(group, sArgs, zoneCluster);
 		PrintToChat(client, "Map Zones > Added new cluster \"%s\".", zoneCluster[ZC_name]);
 		
 		// Add the currently edited zone to the new cluster right away.
@@ -1063,6 +1059,42 @@ public Native_StartAddingZone(Handle:plugin, numParams)
 	
 	// Start the process of adding a new zone.
 	StartZoneAdding(client);
+}
+
+// native MapZone_AddCluster(const String:group[], const String:sClusterName[]);
+public Native_AddCluster(Handle:plugin, numParams)
+{
+	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	new String:sClusterName[MAX_ZONE_NAME];
+	GetNativeString(2, sClusterName, sizeof(sClusterName));
+	
+	new group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid zone group name \"%s\"", sGroupName);
+		return;
+	}
+	
+	// Make sure there is that name isn't taken already.
+	if(ZoneExistsWithName(group, sClusterName))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "There already is a zone named \"%s\" in group \"%s\"", sClusterName, sGroupName);
+		return;
+	}
+	
+	if(ClusterExistsWithName(group, sClusterName))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "There already is a cluster named \"%s\" in group \"%s\"", sClusterName, sGroupName);
+		return;
+	}
+	
+	new zoneCluster[ZoneCluster];
+	AddNewCluster(group, sClusterName, zoneCluster);
+	
+	// Inform other plugins that this cluster is now a thing.
+	CallOnClusterCreated(group, zoneCluster);
 }
 
 // native bool:MapZone_ZoneExists(const String:group[], const String:zoneName[]);
@@ -5373,6 +5405,15 @@ GetFreeAutoZoneName(group[ZoneGroup], String:sBuffer[], maxlen)
 	{
 		Format(sBuffer, maxlen, "Zone %d", iIndex++);
 	} while(ZoneExistsWithName(group, sBuffer));
+}
+
+AddNewCluster(group[ZoneGroup], const String:sClusterName[], zoneCluster[ZoneCluster])
+{
+	strcopy(zoneCluster[ZC_name], MAX_ZONE_NAME, sClusterName);
+	// Don't use a seperate color for this cluster by default.
+	zoneCluster[ZC_color][0] = -1;
+	zoneCluster[ZC_index] = GetArraySize(group[ZG_cluster]);
+	PushArrayArray(group[ZG_cluster], zoneCluster[0], _:ZoneCluster);
 }
 
 /**
