@@ -188,7 +188,7 @@ native bool:MapZone_GetZoneNameByIndex(const String:group[], zoneIndex, MapZoneT
  * @return                  Handle to adt_array containing zone and cluster names
  *                          or INVALID_HANDLE if group doesn't exist.
  */
-native Handle:MapZone_GetGroupZones(const String:group[], bool:bIncludeClusters=true);
+native ArrayList:MapZone_GetGroupZones(const String:group[], bool:bIncludeClusters=true);
 
 /**
  * Get the type of the zone. Clustered or standalone zone.
@@ -222,7 +222,7 @@ stock bool:MapZone_IsClusteredZone(const String:group[], const String:zoneName[]
  * @return             Handle to adt_array containing zone names 
  *                     or INVALID_HANDLE if group or cluster doesn't exist.
  */
-native Handle:MapZone_GetClusterZones(const String:group[], const String:clusterName[]);
+native ArrayList:MapZone_GetClusterZones(const String:group[], const String:clusterName[]);
 
 /**
  * Changes the name of a zone or cluster.
