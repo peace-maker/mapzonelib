@@ -225,6 +225,32 @@ stock bool:MapZone_IsClusteredZone(const String:group[], const String:zoneName[]
 native ArrayList:MapZone_GetClusterZones(const String:group[], const String:clusterName[]);
 
 /**
+ * Get the name of the cluster a zone is part of.
+ *
+ * @param group        The zone group name.
+ * @param zoneName     The name of the zone.
+ * @param clusterName  A buffer to store the cluster name into.
+ * @param maxlen       The buffer size.
+ * @return             True if zone is part of a cluster, false otherwise.
+ * @error              Invalid group or zone name.
+ */
+native bool:MapZone_GetClusterNameOfZone(const String:group[], const String:zoneName[], String:clusterName[], maxlen);
+
+/**
+ * Returns if a zone is part of a cluster.
+ *
+ * @param group        The zone group name.
+ * @param zoneName     The name of the zone.
+ * @return             True if zone is part of a cluster, false otherwise.
+ * @error              Invalid group or zone name.
+ */
+stock bool:MapZone_IsZonePartOfCluster(const String:group[], const String:zoneName[])
+{
+	new String:clusterName[MAX_ZONE_NAME];
+	return MapZone_GetClusterNameOfZone(group, zoneName, clusterName, sizeof(clusterName));
+}
+
+/**
  * Changes the name of a zone or cluster.
  *
  * @param group     The zone group name.
@@ -364,6 +390,7 @@ public __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_GetGroupZones");
 	MarkNativeAsOptional("MapZone_GetZoneType");
 	MarkNativeAsOptional("MapZone_GetClusterZones");
+	MarkNativeAsOptional("MapZone_GetClusterNameOfZone");
 	MarkNativeAsOptional("MapZone_SetZoneName");
 	MarkNativeAsOptional("MapZone_GetZonePosition");
 	MarkNativeAsOptional("MapZone_GetCustomString");
