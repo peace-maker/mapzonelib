@@ -293,9 +293,7 @@ forward MapZone_OnClientLeaveZone(client, const String:sZoneGroup[], const Strin
 
 /**
  * Called when a zone or cluster was created on the map.
- * This is called for every zone when loading the zones from the configs or database.
- * Zones in a cluster don't get mentioned in this forward, but only the cluster they are in.
- * When removing a zone from a cluster this forward gets called with the - now - standalone zone.
+ * This is called for every zone or cluster when loading the zones from the configs or database.
  *
  * @param sZoneGroup  The name of the group the zone was created in.
  * @param sZoneName   The name of the zone.
@@ -308,11 +306,6 @@ forward MapZone_OnZoneCreated(const String:sZoneGroup[], const String:sZoneName[
 
 /**
  * Called when a zone or cluster was removed from the map.
- * When removing a cluster including the contained zones, this only fires for the cluster
- * and not for every single contained zone.
- *
- * This gets called for the zone which just got assigned to a cluster too,
- * since it's no longer there on its own.
  *
  * @param sZoneGroup  The name of the group the zone was removed from.
  * @param sZoneName   The name of the zone.
@@ -321,6 +314,27 @@ forward MapZone_OnZoneCreated(const String:sZoneGroup[], const String:sZoneName[
  * @noreturn
  */
 forward MapZone_OnZoneRemoved(const String:sZoneGroup[], const String:sZoneName[], MapZoneType:type, iRemover);
+
+/**
+ * Called when a zone is added to a cluster.
+ * Called for every zone in a cluster too when loading them from the config or database.
+ *
+ * @param sZoneGroup    The name of the group.
+ * @param sZoneName     The name of the zone.
+ * @param sClusterName  The name of the cluster the zone was added to.
+ * @param iAdmin        The client index of the user adding the zone to the cluster or 0 if it has been loaded from elsewhere.
+ */
+forward MapZone_OnZoneAddedToCluster(const String:sZoneGroup[], const String:sZoneName[], const String:sClusterName[], iAdmin);
+
+/**
+ * Called when a zone is removed from a cluster.
+ *
+ * @param sZoneGroup    The name of the group.
+ * @param sZoneName     The name of the zone.
+ * @param sClusterName  The name of the cluster the zone was removed from.
+ * @param iAdmin        The client index of the user removing the zone from the cluster.
+ */
+forward MapZone_OnZoneRemovedFromCluster(const String:sZoneGroup[], const String:sZoneName[], const String:sClusterName[], iAdmin);
 
 public SharedPlugin:__pl_mapzonelib = 
 {

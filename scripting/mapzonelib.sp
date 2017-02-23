@@ -113,6 +113,8 @@ new Handle:g_hfwdOnEnterForward;
 new Handle:g_hfwdOnLeaveForward;
 new Handle:g_hfwdOnCreatedForward;
 new Handle:g_hfwdOnRemovedForward;
+new Handle:g_hfwdOnAddedToClusterForward;
+new Handle:g_hfwdOnRemovedFromClusterForward;
 
 // Displaying of zones using laser beams
 new Handle:g_hShowZonesTimer;
@@ -187,6 +189,10 @@ public OnPluginStart()
 	g_hfwdOnCreatedForward = CreateGlobalForward("MapZone_OnZoneCreated", ET_Ignore, Param_String, Param_String, Param_Cell, Param_Cell);
 	// forward MapZone_OnZoneRemoved(const String:sZoneGroup[], const String:sZoneName[], ZoneType:type, iRemover);
 	g_hfwdOnRemovedForward = CreateGlobalForward("MapZone_OnZoneRemoved", ET_Ignore, Param_String, Param_String, Param_Cell, Param_Cell);
+	// forward MapZone_OnZoneAddedToCluster(const String:sZoneGroup[], const String:sZoneName[], const String:sClusterName[], iAdmin);
+	g_hfwdOnAddedToClusterForward = CreateGlobalForward("MapZone_OnZoneAddedToCluster", ET_Ignore, Param_String, Param_String, Param_String, Param_Cell);
+	// forward MapZone_OnZoneRemovedFromCluster(const String:sZoneGroup[], const String:sZoneName[], const String:sClusterName[], iAdmin);
+	g_hfwdOnRemovedFromClusterForward = CreateGlobalForward("MapZone_OnZoneRemovedFromCluster", ET_Ignore, Param_String, Param_String, Param_String, Param_Cell);
 	g_hZoneGroups = CreateArray(_:ZoneGroup);
 	
 	LoadTranslations("common.phrases");
@@ -548,6 +554,10 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 		
 			zoneData[ZD_clusterIndex] = zoneCluster[ZC_index];
 			SaveZone(group, zoneData);
+			
+			// Inform other plugins.
+			CallOnAddedToCluster(group, zoneData, zoneCluster, client);
+			
 			DisplayZoneEditMenu(client);
 		}
 		else
@@ -788,43 +798,7 @@ public Native_RegisterZoneGroup(Handle:plugin, numParams)
 	if(GetGroupByName(sName, group))
 	{
 		// Call the creation forwards again for all the zones as if they were just loaded.
-		new zoneData[ZoneData];
-		new iZoneCount = GetArraySize(group[ZG_zones]);
-		for (new i=0; i<iZoneCount; i++)
-		{
-			GetZoneByIndex(i, group, zoneData);
-			if (zoneData[ZD_deleted])
-				continue;
-			
-			// Clusters are notified about seperately.
-			// Not for each zone they consist of.
-			if (zoneData[ZD_clusterIndex] != -1)
-				continue;
-			
-			Call_StartForward(g_hfwdOnCreatedForward);
-			Call_PushString(group[ZG_name]);
-			Call_PushString(zoneData[ZD_name]);
-			Call_PushCell(MapZoneType_Zone);
-			Call_PushCell(0);
-			Call_Finish();
-		}
-		
-		// Inform about clusters too.
-		new zoneCluster[ZoneCluster];
-		new iClusterCount = GetArraySize(group[ZG_cluster]);
-		for (new i=0; i<iClusterCount; i++)
-		{
-			GetZoneClusterByIndex(i, group, zoneCluster);
-			if (zoneCluster[ZC_deleted])
-				continue;
-			
-			Call_StartForward(g_hfwdOnCreatedForward);
-			Call_PushString(group[ZG_name]);
-			Call_PushString(zoneCluster[ZC_name]);
-			Call_PushCell(MapZoneType_Cluster);
-			Call_PushCell(0);
-			Call_Finish();
-		}
+		CallOnCreatedForAllInGroup(group);
 		return;
 	}
 	
@@ -2259,11 +2233,28 @@ public Menu_HandleZoneList(Handle:menu, MenuAction:action, param1, param2)
 				return;
 			}
 
+			// Check if the zone was in a cluster before
+			if (zoneData[ZD_clusterIndex] != -1)
+			{
+				new oldZoneCluster[ZoneCluster];
+				GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, oldZoneCluster);
+				if (!oldZoneCluster[ZC_deleted])
+				{
+					// Inform other plugins that this zone is no longer part of that cluster.
+					CallOnRemovedFromCluster(group, zoneData, oldZoneCluster, param1);
+					
+					// TODO: Evaluate again, if the client is still in the old cluster?
+				}
+			}
+			
 			// Add the zone to the cluster and display the list right again.
-			// TODO: Check if the zone was in a cluster before and evaluate again, if the client is still in the old cluster?
 			zoneData[ZD_clusterIndex] = g_ClientMenuState[param1][CMS_cluster];
 			SaveZone(group, zoneData);
 			PrintToChat(param1, "Map Zones > Added zone \"%s\" to cluster \"%s\" in group \"%s\".", zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
+			
+			// Inform other plugins about this change.
+			CallOnAddedToCluster(group, zoneData, zoneCluster, param1);
+			
 			DisplayZoneListMenu(param1);
 		}
 	}
@@ -2617,6 +2608,9 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 			{
 				RemoveZoneTrigger(group, zoneData);
 				zoneData[ZD_deleted] = true;
+				
+				// Call this before actually deleting, so other plugins can still access the properties.
+				CallOnZoneRemoved(group, zoneData, param1);
 			}
 			// Just remove the zone from the cluster, but keep it.
 			else
@@ -2627,7 +2621,7 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 			
 			// Inform other plugins that this zone is now "created" on it's own.
 			if (!bDeleteZones)
-				CallOnZoneCreated(group, zoneData, param1);
+				CallOnRemovedFromCluster(group, zoneData, zoneCluster, param1);
 			
 			iZonesCount++;
 		}
@@ -3028,6 +3022,9 @@ public Menu_HandleClusterSelection(Handle:menu, MenuAction:action, param1, param
 		
 		zoneData[ZD_clusterIndex] = iClusterIndex;
 		SaveZone(group, zoneData);
+		
+		CallOnAddedToCluster(group, zoneData, zoneCluster, param1);
+		
 		DisplayZoneEditMenu(param1);
 	}
 	else if(action == MenuAction_Cancel)
@@ -3063,7 +3060,7 @@ public Panel_HandleConfirmRemoveFromCluster(Handle:menu, MenuAction:action, para
 			SaveZone(group, zoneData);
 			
 			// Inform other plugins that this zone is now on its own.
-			CallOnZoneCreated(group, zoneData, param1);
+			CallOnRemovedFromCluster(group, zoneData, zoneCluster, param1);
 			
 			LogAction(param1, -1, "%L removed zone \"%s\" from cluster \"%s\" in group \"%s\".", param1, zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
 		}
@@ -3091,6 +3088,13 @@ public Panel_HandleConfirmDeleteZone(Handle:menu, MenuAction:action, param1, par
 			GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
 			
 			// Inform other plugins that this zone is no more.
+			new zoneCluster[ZoneCluster];
+			if(zoneData[ZD_clusterIndex] != -1)
+			{
+				GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
+				// First tell them the zone is leaving the cluster for consistency.
+				CallOnRemovedFromCluster(group, zoneData, zoneCluster, param1);
+			}
 			// Do it before marking it as deleted, so the plugins can still access its properties.
 			CallOnZoneRemoved(group, zoneData, param1);
 			
@@ -3114,9 +3118,6 @@ public Panel_HandleConfirmDeleteZone(Handle:menu, MenuAction:action, param1, par
 			}
 			else
 			{
-				new zoneCluster[ZoneCluster];
-				if(zoneData[ZD_clusterIndex] != -1)
-					GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
 				LogAction(param1, -1, "%L deleted zone \"%s\" from cluster \"%s\" of group \"%s\".", param1, zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
 				DisplayClusterEditMenu(param1);
 			}
@@ -4977,11 +4978,16 @@ CallOnCreatedForAllInGroup(group[ZoneGroup])
 		if (zoneData[ZD_deleted])
 			continue;
 		
-		// Don't fire the forward for zones in a cluster.
-		if (zoneData[ZD_clusterIndex] != -1)
+		CallOnZoneCreated(group, zoneData);
+		
+		if (zoneData[ZD_clusterIndex] == -1)
 			continue;
 		
-		CallOnZoneCreated(group, zoneData);
+		GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
+		if (zoneCluster[ZC_deleted])
+			continue;
+		
+		CallOnAddedToCluster(group, zoneData, zoneCluster, 0);
 	}
 }
 
@@ -5024,6 +5030,26 @@ CallOnClusterRemoved(group[ZoneGroup], zoneCluster[ZoneCluster], iDeleter)
 	Call_PushString(zoneCluster[ZC_name]);
 	Call_PushCell(MapZoneType_Cluster);
 	Call_PushCell(iDeleter);
+	Call_Finish();
+}
+
+CallOnAddedToCluster(group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster], iAdmin)
+{
+	Call_StartForward(g_hfwdOnAddedToClusterForward);
+	Call_PushString(group[ZG_name]);
+	Call_PushString(zoneData[ZD_name]);
+	Call_PushString(zoneCluster[ZC_name]);
+	Call_PushCell(iAdmin);
+	Call_Finish();
+}
+
+CallOnRemovedFromCluster(group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster], iAdmin)
+{
+	Call_StartForward(g_hfwdOnRemovedFromClusterForward);
+	Call_PushString(group[ZG_name]);
+	Call_PushString(zoneData[ZD_name]);
+	Call_PushString(zoneCluster[ZC_name]);
+	Call_PushCell(iAdmin);
 	Call_Finish();
 }
 
@@ -5406,6 +5432,10 @@ SaveNewZone(client, const String:sName[])
 	
 	// Inform other plugins that this zone is here now.
 	CallOnZoneCreated(group, zoneData, client);
+	
+	// Tell if this zone was added to a cluster right away.
+	if (zoneData[ZD_clusterIndex] != -1)
+		CallOnAddedToCluster(group, zoneData, zoneCluster, client);
 	
 	// Edit the new zone right away.
 	g_ClientMenuState[client][CMS_zone] = zoneData[ZD_index];
