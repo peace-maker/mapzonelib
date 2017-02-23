@@ -3128,13 +3128,6 @@ public Panel_HandleConfirmDeleteZone(Handle:menu, MenuAction:action, param1, par
 			GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
 			
 			// Inform other plugins that this zone is no more.
-			new zoneCluster[ZoneCluster];
-			if(zoneData[ZD_clusterIndex] != -1)
-			{
-				GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
-				// First tell them the zone is leaving the cluster for consistency.
-				CallOnRemovedFromCluster(group, zoneData, zoneCluster, param1);
-			}
 			// Do it before marking it as deleted, so the plugins can still access its properties.
 			CallOnZoneRemoved(group, zoneData, param1);
 			
@@ -3158,6 +3151,9 @@ public Panel_HandleConfirmDeleteZone(Handle:menu, MenuAction:action, param1, par
 			}
 			else
 			{
+				new zoneCluster[ZoneCluster];
+				if(zoneData[ZD_clusterIndex] != -1)
+					GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
 				LogAction(param1, -1, "%L deleted zone \"%s\" from cluster \"%s\" of group \"%s\".", param1, zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
 				DisplayClusterEditMenu(param1);
 			}
