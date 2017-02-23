@@ -2621,13 +2621,6 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 		
 		new bool:bDeleteZones = param2 == 1;
 		
-		// Inform other plugins that this cluster is now history.
-		CallOnClusterRemoved(group, zoneCluster, param1);
-		
-		// We can't really delete it, because the array indicies would shift. Just don't save it to file and skip it.
-		zoneCluster[ZC_deleted] = true;
-		SaveCluster(group, zoneCluster);
-		
 		// Delete all contained zones in the cluster too.
 		// Make sure the trigger is removed.
 		new iNumZones = GetArraySize(group[ZG_zones]);
@@ -2665,6 +2658,13 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 			
 			iZonesCount++;
 		}
+		
+		// Inform other plugins that this cluster is now history.
+		CallOnClusterRemoved(group, zoneCluster, param1);
+		
+		// We can't really delete it, because the array indicies would shift. Just don't save it to file and skip it.
+		zoneCluster[ZC_deleted] = true;
+		SaveCluster(group, zoneCluster);
 		
 		g_ClientMenuState[param1][CMS_cluster] = -1;
 		// Don't open our own menu if we're told to call the menu cancel callback.
