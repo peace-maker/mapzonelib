@@ -786,7 +786,47 @@ public Native_RegisterZoneGroup(Handle:plugin, numParams)
 	new group[ZoneGroup];
 	// See if there already is a group with that name
 	if(GetGroupByName(sName, group))
+	{
+		// Call the creation forwards again for all the zones as if they were just loaded.
+		new zoneData[ZoneData];
+		new iZoneCount = GetArraySize(group[ZG_zones]);
+		for (new i=0; i<iZoneCount; i++)
+		{
+			GetZoneByIndex(i, group, zoneData);
+			if (zoneData[ZD_deleted])
+				continue;
+			
+			// Clusters are notified about seperately.
+			// Not for each zone they consist of.
+			if (zoneData[ZD_clusterIndex] != -1)
+				continue;
+			
+			Call_StartForward(g_hfwdOnCreatedForward);
+			Call_PushString(group[ZG_name]);
+			Call_PushString(zoneData[ZD_name]);
+			Call_PushCell(MapZoneType_Zone);
+			Call_PushCell(0);
+			Call_Finish();
+		}
+		
+		// Inform about clusters too.
+		new zoneCluster[ZoneCluster];
+		new iClusterCount = GetArraySize(group[ZG_cluster]);
+		for (new i=0; i<iClusterCount; i++)
+		{
+			GetZoneClusterByIndex(i, group, zoneCluster);
+			if (zoneCluster[ZC_deleted])
+				continue;
+			
+			Call_StartForward(g_hfwdOnCreatedForward);
+			Call_PushString(group[ZG_name]);
+			Call_PushString(zoneCluster[ZC_name]);
+			Call_PushCell(MapZoneType_Cluster);
+			Call_PushCell(0);
+			Call_Finish();
+		}
 		return;
+	}
 	
 	strcopy(group[ZG_name][0], MAX_ZONE_GROUP_NAME, sName);
 	group[ZG_zones] = CreateArray(_:ZoneData);
