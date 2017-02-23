@@ -87,10 +87,11 @@ native bool:MapZone_SetMenuCancelAction(const String:group[], MapZoneMenuCancelC
  *
  * @param group         The zone group name.
  * @param sClusterName  The name of the new cluster.
+ * @param iAdmin        Optional: Client index of admin who added the cluster.
  * @noreturn
- * @error               There already exists a zone or cluster with that name.
+ * @error               There already exists a zone, cluster with that name or invalid client index.
  */
-native MapZone_AddCluster(const String:group[], const String:sClusterName[]);
+native MapZone_AddCluster(const String:group[], const String:sClusterName[], iAdmin=0);
 
 /**
  * Start adding a zone in a zone group. Opens the edit menu afterwards.

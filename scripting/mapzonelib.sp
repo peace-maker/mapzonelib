@@ -1091,7 +1091,7 @@ public Native_StartAddingZone(Handle:plugin, numParams)
 	StartZoneAdding(client);
 }
 
-// native MapZone_AddCluster(const String:group[], const String:sClusterName[]);
+// native MapZone_AddCluster(const String:group[], const String:sClusterName[], iAdmin=0);
 public Native_AddCluster(Handle:plugin, numParams)
 {
 	new String:sGroupName[MAX_ZONE_GROUP_NAME];
@@ -1099,6 +1099,8 @@ public Native_AddCluster(Handle:plugin, numParams)
 	
 	new String:sClusterName[MAX_ZONE_NAME];
 	GetNativeString(2, sClusterName, sizeof(sClusterName));
+	
+	new iAdmin = GetNativeCell(3);
 	
 	new group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
@@ -1120,11 +1122,17 @@ public Native_AddCluster(Handle:plugin, numParams)
 		return;
 	}
 	
+	if (iAdmin < 0 || iAdmin > MaxClients)
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid admin client index %d", iAdmin);
+		return;
+	}
+	
 	new zoneCluster[ZoneCluster];
 	AddNewCluster(group, sClusterName, zoneCluster);
 	
 	// Inform other plugins that this cluster is now a thing.
-	CallOnClusterCreated(group, zoneCluster);
+	CallOnClusterCreated(group, zoneCluster, iAdmin);
 }
 
 // native bool:MapZone_ZoneExists(const String:group[], const String:zoneName[]);
