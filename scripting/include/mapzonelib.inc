@@ -30,9 +30,8 @@ enum MapZoneType
  * If there already are zones saved for that group, they are loaded.
  *
  * @param group    The name of the group.
- * @noreturn
  */
-native MapZone_RegisterZoneGroup(const String:group[]);
+native void MapZone_RegisterZoneGroup(const char[] group);
 
 /**
  * Shows the zone editing admin menu to a client.
@@ -43,7 +42,7 @@ native MapZone_RegisterZoneGroup(const String:group[]);
  * @param group    The zone group name.
  * @return         True if menu was shown, false if no zone group with that name.
  */
-native bool:MapZone_ShowMenu(client, const String:group[]);
+native bool MapZone_ShowMenu(int client, const char[] group);
 
 /**
  * Show the edit menu of a zone or cluster right away.
@@ -54,9 +53,8 @@ native bool:MapZone_ShowMenu(client, const String:group[]);
  * @param bEnableCancelForward  Call the menu cancel forward when going back from this edit menu
  *                              instead of the zone list? Ignored if no menu cancel callback registered.
  *                              @see MapZone_SetMenuCancelAction
- * @noreturn
  */
-native MapZone_ShowZoneEditMenu(client, const String:group[], const String:zoneName[], bool:bEnableCancelForward = false);
+native void MapZone_ShowZoneEditMenu(int client, const char[] group, const char[] zoneName, bool bEnableCancelForward = false);
 
 /**
  * Called when a client selects the "Back" option in
@@ -69,7 +67,7 @@ native MapZone_ShowZoneEditMenu(client, const String:group[], const String:zoneN
  * @param group    The zone group name.
  * @noreturn
  */
-functag public MapZoneMenuCancelCB(client, reason, const String:group[]);
+typedef MapZoneMenuCancelCB = function void (int client, int reason, const char[] group);
 
 /**
  * Register for the cancel action of the zone group menu.
@@ -80,7 +78,7 @@ functag public MapZoneMenuCancelCB(client, reason, const String:group[]);
  * @param callback The callback function to call when the zone root menu is cancelled.
  * @return True if callback registered, false if no zone group with that name.
  */
-native bool:MapZone_SetMenuCancelAction(const String:group[], MapZoneMenuCancelCB:callback);
+native bool MapZone_SetMenuCancelAction(const char[] group, MapZoneMenuCancelCB callback);
 
 /**
  * Add a new cluster to that zone group.
@@ -88,10 +86,9 @@ native bool:MapZone_SetMenuCancelAction(const String:group[], MapZoneMenuCancelC
  * @param group         The zone group name.
  * @param sClusterName  The name of the new cluster.
  * @param iAdmin        Optional: Client index of admin who added the cluster.
- * @noreturn
  * @error               There already exists a zone, cluster with that name or invalid client index.
  */
-native MapZone_AddCluster(const String:group[], const String:sClusterName[], iAdmin=0);
+native void MapZone_AddCluster(const char[] group, const char[] sClusterName, int iAdmin=0);
 
 /**
  * Start adding a zone in a zone group. Opens the edit menu afterwards.
@@ -105,10 +102,9 @@ native MapZone_AddCluster(const String:group[], const String:sClusterName[], iAd
  *                              Ignored if no menu cancel callback registered.
  *                              @see MapZone_SetMenuCancelAction
  * @param sClusterName          Optional: The name of the cluster this zone should be added to.
- * @noreturn
  * @error                       Invalid group name, zone name already taken, invalid client index, invalid cluster name.
  */
-native MapZone_StartAddingZone(client, const String:group[], const String:sZoneName[] = "", bool:bEnableCancelForward = false, const String:sClusterName[] = "");
+native void MapZone_StartAddingZone(int client, const char[] group, const char[] sZoneName = "", bool bEnableCancelForward = false, const char[] sClusterName = "");
 
 /**
  * Set the default color of the zone beams for this group.
@@ -117,7 +113,7 @@ native MapZone_StartAddingZone(client, const String:group[], const String:sZoneN
  * @param iColor  The RGBA colors of the laser.
  * @return        True if set, false if no zone group with that name.
  */
-native bool:MapZone_SetZoneDefaultColor(const String:group[], const iColor[4]);
+native bool MapZone_SetZoneDefaultColor(const char[] group, const int iColor[4]);
 
 /**
  * Set the color of the zone.
@@ -127,7 +123,7 @@ native bool:MapZone_SetZoneDefaultColor(const String:group[], const iColor[4]);
  * @param iColor    The RGBA colors of the laser.
  * @return          True if set, false if no zone group or zone with that name.
  */
-native bool:MapZone_SetZoneColor(const String:group[], const String:zoneName[], const iColor[4]);
+native bool MapZone_SetZoneColor(const char[] group, const char[] zoneName, const int iColor[4]);
 
 /**
  * Show or hide a zone per client.
@@ -139,7 +135,7 @@ native bool:MapZone_SetZoneColor(const String:group[], const String:zoneName[], 
  * @return          True when changed, false if no zone group or zone with that name.
  * @error           Invalid client index.
  */
-native bool:MapZone_SetClientZoneVisibility(const String:group[], const String:zoneName[], client, bool bVisible);
+native bool MapZone_SetClientZoneVisibility(const char[] group, const char[] zoneName, int client, bool bVisible);
 
 /**
  * Check if a zone with that name exists in a zone group.
@@ -148,7 +144,7 @@ native bool:MapZone_SetClientZoneVisibility(const String:group[], const String:z
  * @param zoneName  The zone or cluster name.
  * @return          True if there is zone or cluster with that name in the group, false otherwise.
  */
-native bool:MapZone_ZoneExists(const String:group[], const String:zoneName[]);
+native bool MapZone_ZoneExists(const char[] group, const char[] zoneName);
 
 /**
  * Get the temporary internal zone index which is a unique identifier of the zone during the map.
@@ -162,7 +158,7 @@ native bool:MapZone_ZoneExists(const String:group[], const String:zoneName[]);
  * @return             The internal index of the zone.
  * @error              Invalid group or zone name.
  */
-native MapZone_GetZoneIndex(const String:group[], const String:zoneName[], &MapZoneType:mapZoneType);
+native int MapZone_GetZoneIndex(const char[] group, const char[] zoneName, MapZoneType &mapZoneType);
 
 /**
  * Get the name of the zone or cluster behind that internal index.
@@ -176,7 +172,7 @@ native MapZone_GetZoneIndex(const String:group[], const String:zoneName[], &MapZ
  * @return             True if name was copied, false if zone or cluster got deleted.
  * @error              Invalid group name or invalid index for that type.
  */
-native bool:MapZone_GetZoneNameByIndex(const String:group[], zoneIndex, MapZoneType:mapZoneType, String:zoneName[], maxlen);
+native bool MapZone_GetZoneNameByIndex(const char[] group, int zoneIndex, MapZoneType mapZoneType, char[] zoneName, int maxlen);
 
 /**
  * Get an adt_array of zone (and cluster) names of this group.
@@ -189,7 +185,7 @@ native bool:MapZone_GetZoneNameByIndex(const String:group[], zoneIndex, MapZoneT
  * @return                  Handle to adt_array containing zone and cluster names
  *                          or INVALID_HANDLE if group doesn't exist.
  */
-native ArrayList:MapZone_GetGroupZones(const String:group[], bool:bIncludeClusters=true);
+native ArrayList MapZone_GetGroupZones(const char[] group, bool bIncludeClusters=true);
 
 /**
  * Get the type of the zone. Clustered or standalone zone.
@@ -199,7 +195,7 @@ native ArrayList:MapZone_GetGroupZones(const String:group[], bool:bIncludeCluste
  * @return          The MapZoneType. Standalone zone or cluster?
  * @error           Invalid group or zone name.
  */
-native MapZoneType:MapZone_GetZoneType(const String:group[], const String:zoneName[]);
+native MapZoneType MapZone_GetZoneType(const char[] group, const char[] zoneName);
 
 /**
  * Check if a zone is made of several smaller zones.
@@ -208,7 +204,7 @@ native MapZoneType:MapZone_GetZoneType(const String:group[], const String:zoneNa
  * @param zoneName The name of the zone to check for clustering.
  * @return         True if zone is a cluster, false otherwise.
  */
-stock bool:MapZone_IsClusteredZone(const String:group[], const String:zoneName[])
+stock bool MapZone_IsClusteredZone(const char[] group, const char[] zoneName)
 {
 	return MapZone_GetZoneType(group, zoneName) == MapZoneType_Cluster;
 }
@@ -223,7 +219,7 @@ stock bool:MapZone_IsClusteredZone(const String:group[], const String:zoneName[]
  * @return             Handle to adt_array containing zone names 
  *                     or INVALID_HANDLE if group or cluster doesn't exist.
  */
-native ArrayList:MapZone_GetClusterZones(const String:group[], const String:clusterName[]);
+native ArrayList MapZone_GetClusterZones(const char[] group, const char[] clusterName);
 
 /**
  * Get the name of the cluster a zone is part of.
@@ -235,7 +231,7 @@ native ArrayList:MapZone_GetClusterZones(const String:group[], const String:clus
  * @return             True if zone is part of a cluster, false otherwise.
  * @error              Invalid group or zone name.
  */
-native bool:MapZone_GetClusterNameOfZone(const String:group[], const String:zoneName[], String:clusterName[], maxlen);
+native bool MapZone_GetClusterNameOfZone(const char[] group, const char[] zoneName, char[] clusterName, int maxlen);
 
 /**
  * Returns if a zone is part of a cluster.
@@ -245,9 +241,9 @@ native bool:MapZone_GetClusterNameOfZone(const String:group[], const String:zone
  * @return             True if zone is part of a cluster, false otherwise.
  * @error              Invalid group or zone name.
  */
-stock bool:MapZone_IsZonePartOfCluster(const String:group[], const String:zoneName[])
+stock bool MapZone_IsZonePartOfCluster(const char[] group, const char[] zoneName)
 {
-	new String:clusterName[MAX_ZONE_NAME];
+	char clusterName[MAX_ZONE_NAME];
 	return MapZone_GetClusterNameOfZone(group, zoneName, clusterName, sizeof(clusterName));
 }
 
@@ -260,7 +256,7 @@ stock bool:MapZone_IsZonePartOfCluster(const String:group[], const String:zoneNa
  * @return          True if name was changed, false if there already is a zone or cluster with the new name.
  * @error           Invalid group or zone name.
  */
-native bool:MapZone_SetZoneName(const String:group[], const String:sOldName[], const String:sNewName[]);
+native bool MapZone_SetZoneName(const char[] group, const char[] sOldName, const char[] sNewName);
 
 /**
  * Get the center position of a zone.
@@ -270,7 +266,7 @@ native bool:MapZone_SetZoneName(const String:group[], const String:sOldName[], c
  * @param fCenter   Buffer to store center coordinates in.
  * @error           Invalid group or zone name.
  */
-native MapZone_GetZonePosition(const String:group[], const String:sZoneName[], Float:fCenter[3]);
+native void MapZone_GetZonePosition(const char[] group, const char[] sZoneName, float fCenter[3]);
 
 /**
  * Get the value of a custom key for a zone or cluster.
@@ -282,7 +278,7 @@ native MapZone_GetZonePosition(const String:group[], const String:sZoneName[], F
  * @param maxlne	The length of the value buffer.
  * @return			True if key was found and value was retrieved, false if no group or zone with that name or no keyvalue for that key.
  */
-native bool:MapZone_GetCustomString(const String:group[], const String:zoneName[], const String:key[], String:value[], maxlen);
+native bool MapZone_GetCustomString(const char[] group, const char[] zoneName, const char[] key, char[] value, int maxlen);
 
 /**
  * Set the value of a custom key for a zone or cluster.
@@ -295,7 +291,7 @@ native bool:MapZone_GetCustomString(const String:group[], const String:zoneName[
  * @param value		The new value associated with the key.
  * @return			True if value was written, false if no group or zone with that name.
  */
-native bool:MapZone_SetCustomString(const String:group[], const String:zoneName[], const String:key[], const String:value[]);
+native bool MapZone_SetCustomString(const char[] group, const char[] zoneName, const char[] key, const char[] value);
 
 /**
  * Called when a client enteres a zone.
@@ -303,9 +299,8 @@ native bool:MapZone_SetCustomString(const String:group[], const String:zoneName[
  * @param client      The client index.
  * @param sZoneGroup  The group name of the group containing the zone.
  * @param sZoneName   The name of the zone.
- * @noreturn
  */
-forward MapZone_OnClientEnterZone(client, const String:sZoneGroup[], const String:sZoneName[]);
+forward void MapZone_OnClientEnterZone(int client, const char[] sZoneGroup, const char[] sZoneName);
 
 /**
  * Called when a client leaves a zone.
@@ -313,9 +308,8 @@ forward MapZone_OnClientEnterZone(client, const String:sZoneGroup[], const Strin
  * @param client      The client index.
  * @param sZoneGroup  The name of the group containing the zone.
  * @param sZoneName   The name of the zone.
- * @noreturn
  */
-forward MapZone_OnClientLeaveZone(client, const String:sZoneGroup[], const String:sZoneName[]);
+forward void MapZone_OnClientLeaveZone(int client, const char[] sZoneGroup, const char[] sZoneName);
 
 
 /**
@@ -326,9 +320,8 @@ forward MapZone_OnClientLeaveZone(client, const String:sZoneGroup[], const Strin
  * @param sZoneName   The name of the zone.
  * @param type        The type of the zone (Zone or Cluster).
  * @param iCreator    The client index of the user who created that zone or 0 if it has been loaded from elsewhere.
- * @noreturn
  */
-forward MapZone_OnZoneCreated(const String:sZoneGroup[], const String:sZoneName[], MapZoneType:type, iCreator);
+forward void MapZone_OnZoneCreated(const char[] sZoneGroup, const char[] sZoneName, MapZoneType type, int iCreator);
 
 
 /**
@@ -338,9 +331,8 @@ forward MapZone_OnZoneCreated(const String:sZoneGroup[], const String:sZoneName[
  * @param sZoneName   The name of the zone.
  * @param type        The type of the zone (Zone or Cluster).
  * @param iCreator    The client index of the user who removed that zone.
- * @noreturn
  */
-forward MapZone_OnZoneRemoved(const String:sZoneGroup[], const String:sZoneName[], MapZoneType:type, iRemover);
+forward void MapZone_OnZoneRemoved(const char[] sZoneGroup, const char[] sZoneName, MapZoneType type, int iRemover);
 
 /**
  * Called when a zone is added to a cluster.
@@ -351,7 +343,7 @@ forward MapZone_OnZoneRemoved(const String:sZoneGroup[], const String:sZoneName[
  * @param sClusterName  The name of the cluster the zone was added to.
  * @param iAdmin        The client index of the user adding the zone to the cluster or 0 if it has been loaded from elsewhere.
  */
-forward MapZone_OnZoneAddedToCluster(const String:sZoneGroup[], const String:sZoneName[], const String:sClusterName[], iAdmin);
+forward void MapZone_OnZoneAddedToCluster(const char[] sZoneGroup, const char[] sZoneName, const char[] sClusterName, int iAdmin);
 
 /**
  * Called when a zone is removed from a cluster.
@@ -361,9 +353,9 @@ forward MapZone_OnZoneAddedToCluster(const String:sZoneGroup[], const String:sZo
  * @param sClusterName  The name of the cluster the zone was removed from.
  * @param iAdmin        The client index of the user removing the zone from the cluster.
  */
-forward MapZone_OnZoneRemovedFromCluster(const String:sZoneGroup[], const String:sZoneName[], const String:sClusterName[], iAdmin);
+forward void MapZone_OnZoneRemovedFromCluster(const char[] sZoneGroup, const char[] sZoneName, const char[] sClusterName, int iAdmin);
 
-public SharedPlugin:__pl_mapzonelib = 
+public SharedPlugin __pl_mapzonelib = 
 {
 	name = "mapzonelib",
 	file = "mapzonelib.smx",
@@ -375,7 +367,7 @@ public SharedPlugin:__pl_mapzonelib =
 };
 
 #if !defined REQUIRE_PLUGIN
-public __pl_mapzonelib_SetNTVOptional()
+public void __pl_mapzonelib_SetNTVOptional()
 {
 	MarkNativeAsOptional("MapZone_RegisterZoneGroup");
 	MarkNativeAsOptional("MapZone_ShowMenu");

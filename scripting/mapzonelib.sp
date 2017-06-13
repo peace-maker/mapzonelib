@@ -2,6 +2,7 @@
 #include <sourcemod>
 #include <mapzonelib>
 #include <smlib>
+#pragma newdecls required
 
 #define PLUGIN_VERSION "1.0"
 
@@ -15,7 +16,7 @@ enum ZoneData {
 	ZD_teamFilter,
 	ZD_color[4],
 	bool:ZD_customKVChanged, // Remember when the custom keyvalues were changed, so we sync the database.
-	Handle:ZD_customKV,
+	StringMap:ZD_customKV,
 	Float:ZD_position[3],
 	Float:ZD_mins[3],
 	Float:ZD_maxs[3],
@@ -34,7 +35,7 @@ enum ZoneCluster {
 	ZC_teamFilter,
 	ZC_color[4],
 	bool:ZC_customKVChanged, // Remember when the custom keyvalues were changed, so we sync the database.
-	Handle:ZC_customKV,
+	StringMap:ZC_customKV,
 	bool:ZC_adminShowZones[MAXPLAYERS+1],  // Just to remember if we want to toggle all zones in this cluster on or off.
 	ZC_clientInZones[MAXPLAYERS+1], // Save for each player in how many zones of this cluster he is.
 	String:ZC_name[MAX_ZONE_NAME]
@@ -42,8 +43,8 @@ enum ZoneCluster {
 
 enum ZoneGroup {
 	ZG_index,
-	Handle:ZG_zones,
-	Handle:ZG_cluster,
+	ArrayList:ZG_zones,
+	ArrayList:ZG_cluster,
 	Handle:ZG_menuCancelForward,
 	ZG_filterEntTeam[2], // Filter entities for teams
 	bool:ZG_showZones,
@@ -65,7 +66,7 @@ enum ZonePreviewMode {
 
 // The different step sizes when modifying one point of a zone the user can choose from.
 #define DEFAULT_STEPSIZE_INDEX 3
-new Float:g_fStepsizes[] = {1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0};
+float g_fStepsizes[] = {1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0};
 
 enum ClientMenuState {
 	CMS_group,
@@ -100,61 +101,61 @@ enum ClientClipBoard {
 	String:CB_name[MAX_ZONE_NAME]
 }
 
-new Handle:g_hCVShowZonesDefault;
-new Handle:g_hCVOptimizeBeams;
-new Handle:g_hCVDebugBeamDistance;
-new Handle:g_hCVMinHeight;
-new Handle:g_hCVDefaultHeight;
+ConVar g_hCVShowZonesDefault;
+ConVar g_hCVOptimizeBeams;
+ConVar g_hCVDebugBeamDistance;
+ConVar g_hCVMinHeight;
+ConVar g_hCVDefaultHeight;
 
-new Handle:g_hCVDatabaseConfig;
-new Handle:g_hCVTablePrefix;
+ConVar g_hCVDatabaseConfig;
+ConVar g_hCVTablePrefix;
 
-new Handle:g_hfwdOnEnterForward;
-new Handle:g_hfwdOnLeaveForward;
-new Handle:g_hfwdOnCreatedForward;
-new Handle:g_hfwdOnRemovedForward;
-new Handle:g_hfwdOnAddedToClusterForward;
-new Handle:g_hfwdOnRemovedFromClusterForward;
+Handle g_hfwdOnEnterForward;
+Handle g_hfwdOnLeaveForward;
+Handle g_hfwdOnCreatedForward;
+Handle g_hfwdOnRemovedForward;
+Handle g_hfwdOnAddedToClusterForward;
+Handle g_hfwdOnRemovedFromClusterForward;
 
 // Displaying of zones using laser beams
-new Handle:g_hShowZonesTimer;
-new g_iLaserMaterial = -1;
-new g_iHaloMaterial = -1;
-new g_iGlowSprite = -1;
+Handle g_hShowZonesTimer;
+int g_iLaserMaterial = -1;
+int g_iHaloMaterial = -1;
+int g_iGlowSprite = -1;
 
 // Central array to save all information about zones
-new Handle:g_hZoneGroups;
+ArrayList g_hZoneGroups;
 
 // Optional database connection
-new Handle:g_hDatabase;
-new String:g_sTablePrefix[64];
-new String:g_sCurrentMap[128];
-new bool:g_bConnectingToDatabase;
+Database g_hDatabase;
+char g_sTablePrefix[64];
+char g_sCurrentMap[128];
+bool g_bConnectingToDatabase;
 // Used to discard old requests when changing the map fast.
-new g_iDatabaseSequence;
+int g_iDatabaseSequence;
 
 // Support for browsing through nested menus
-new g_ClientMenuState[MAXPLAYERS+1][ClientMenuState];
+int g_ClientMenuState[MAXPLAYERS+1][ClientMenuState];
 // Copy & paste zones even over different groups.
-new g_Clipboard[MAXPLAYERS+1][ClientClipBoard];
+int g_Clipboard[MAXPLAYERS+1][ClientClipBoard];
 // Show the crosshair and current zone while adding/editing a zone.
-new Handle:g_hShowZoneWhileEditTimer[MAXPLAYERS+1];
+Handle g_hShowZoneWhileEditTimer[MAXPLAYERS+1];
 // Temporary store the angles the player looked at when starting 
 // to press +attack2 to keep the view and laser point steady.
-new Float:g_fAimCapTempAngles[MAXPLAYERS+1][3];
+float g_fAimCapTempAngles[MAXPLAYERS+1][3];
 // Store the buttons the player pressed in the previous frame, so we know when he started to press something.
-new g_iClientButtons[MAXPLAYERS+1];
+int g_iClientButtons[MAXPLAYERS+1];
 
-public Plugin:myinfo = 
+public Plugin myinfo = 
 {
 	name = "Map Zone Library",
 	author = "Peace-Maker",
 	description = "Manages zones on maps and fires forwards, when players enter or leave the zone.",
 	version = PLUGIN_VERSION,
-	url = "http://www.wcfan.de/"
+	url = "https://www.wcfan.de/"
 }
 
-public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
+public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
 	CreateNative("MapZone_RegisterZoneGroup", Native_RegisterZoneGroup);
 	CreateNative("MapZone_ShowMenu", Native_ShowMenu);
@@ -180,7 +181,7 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 	return APLRes_Success;
 }
 
-public OnPluginStart()
+public void OnPluginStart()
 {
 	// forward MapZone_OnClientEnterZone(client, const String:sZoneGroup[], const String:sZoneName[]);
 	g_hfwdOnEnterForward = CreateGlobalForward("MapZone_OnClientEnterZone", ET_Ignore, Param_Cell, Param_String, Param_String);
@@ -194,7 +195,7 @@ public OnPluginStart()
 	g_hfwdOnAddedToClusterForward = CreateGlobalForward("MapZone_OnZoneAddedToCluster", ET_Ignore, Param_String, Param_String, Param_String, Param_Cell);
 	// forward MapZone_OnZoneRemovedFromCluster(const String:sZoneGroup[], const String:sZoneName[], const String:sClusterName[], iAdmin);
 	g_hfwdOnRemovedFromClusterForward = CreateGlobalForward("MapZone_OnZoneRemovedFromCluster", ET_Ignore, Param_String, Param_String, Param_String, Param_Cell);
-	g_hZoneGroups = CreateArray(_:ZoneGroup);
+	g_hZoneGroups = new ArrayList(view_as<int>(ZoneGroup));
 	
 	LoadTranslations("common.phrases");
 	
@@ -208,36 +209,36 @@ public OnPluginStart()
 	
 	AutoExecConfig(true, "plugin.mapzonelib");
 	
-	HookConVarChange(g_hCVShowZonesDefault, ConVar_OnDebugChanged);
+	g_hCVShowZonesDefault.AddChangeHook(ConVar_OnDebugChanged);
 	
 	HookEvent("round_start", Event_OnRoundStart);
 	HookEvent("player_spawn", Event_OnPlayerSpawn);
 	HookEvent("player_death", Event_OnPlayerDeath);
 	
 	// Clear menu states
-	for(new i=1;i<=MaxClients;i++)
+	for(int i=1;i<=MaxClients;i++)
 		OnClientDisconnect(i);
 }
 
-public OnPluginEnd()
+public void OnPluginEnd()
 {
 	// Map might not be loaded anymore on server shutdown.
 	// Don't create a ".zones" file. OnMapEnd would have been called before, 
 	// so the zones are saved.
-	new String:sMap[32];
+	char sMap[32];
 	if (!GetCurrentMap(sMap, sizeof(sMap)))
 		return;
 	
 	SaveAllZoneGroups();
 	
 	// Kill all created trigger_multiple.
-	new iNumGroups = GetArraySize(g_hZoneGroups);
-	new iNumZones, group[ZoneGroup], zoneData[ZoneData];
-	for(new i=0;i<iNumGroups;i++)
+	int iNumGroups = g_hZoneGroups.Length;
+	int iNumZones, group[ZoneGroup], zoneData[ZoneData];
+	for(int i=0;i<iNumGroups;i++)
 	{
 		GetGroupByIndex(i, group);
-		iNumZones = GetArraySize(group[ZG_zones]);
-		for(new c=0;c<iNumZones;c++)
+		iNumZones = group[ZG_zones].Length;
+		for(int c=0;c<iNumZones;c++)
 		{
 			GetZoneByIndex(c, group, zoneData);
 			RemoveZoneTrigger(group, zoneData);
@@ -248,11 +249,11 @@ public OnPluginEnd()
 /**
  * Core forward callbacks
  */
-public OnConfigsExecuted()
+public void OnConfigsExecuted()
 {
-	new String:sDatabase[256];
-	GetConVarString(g_hCVDatabaseConfig, sDatabase, sizeof(sDatabase));
-	GetConVarString(g_hCVTablePrefix, g_sTablePrefix, sizeof(g_sTablePrefix));
+	char sDatabase[256];
+	g_hCVDatabaseConfig.GetString(sDatabase, sizeof(sDatabase));
+	g_hCVTablePrefix.GetString(g_sTablePrefix, sizeof(g_sTablePrefix));
 	
 	// Remove all zones of the old map
 	ClearZonesInGroups();
@@ -277,17 +278,17 @@ public OnConfigsExecuted()
 	else if (!g_bConnectingToDatabase)
 	{
 		g_bConnectingToDatabase = true;
-		SQL_TConnect(SQL_OnConnect, sDatabase);
+		Database.Connect(SQL_OnConnect, sDatabase);
 	}
 }
 
-public OnMapStart()
+public void OnMapStart()
 {
 	PrecacheModel("models/error.mdl", true);
 
 	// Don't want to redefine the default sprites.
 	// Borrow them for different games from sm's default funcommands plugin.
-	new Handle:hGameConfig = LoadGameConfigFile("funcommands.games");
+	Handle hGameConfig = LoadGameConfigFile("funcommands.games");
 	if (!hGameConfig)
 	{
 		SetFailState("Unable to load game config funcommands.games from stock sourcemod plugin for beam materials.");
@@ -296,7 +297,7 @@ public OnMapStart()
 	
 	GetCurrentMap(g_sCurrentMap, sizeof(g_sCurrentMap));
 	
-	new String:sBuffer[PLATFORM_MAX_PATH];
+	char sBuffer[PLATFORM_MAX_PATH];
 	if (GameConfGetKeyValue(hGameConfig, "SpriteBeam", sBuffer, sizeof(sBuffer)) && sBuffer[0])
 	{
 		g_iLaserMaterial = PrecacheModel(sBuffer, true);
@@ -312,7 +313,7 @@ public OnMapStart()
 		g_iGlowSprite = PrecacheModel(sBuffer, true);
 	}
 	
-	CloseHandle(hGameConfig);
+	delete hGameConfig;
 	
 	// Remove all zones of the old map
 	ClearZonesInGroups();
@@ -320,13 +321,13 @@ public OnMapStart()
 	g_hShowZonesTimer = CreateTimer(2.0, Timer_ShowZones, _, TIMER_FLAG_NO_MAPCHANGE|TIMER_REPEAT);
 }
 
-public OnMapEnd()
+public void OnMapEnd()
 {
 	SaveAllZoneGroups();
-	g_hShowZonesTimer = INVALID_HANDLE;
+	g_hShowZonesTimer = null;
 }
 
-public OnClientDisconnect(client)
+public void OnClientDisconnect(int client)
 {
 	g_ClientMenuState[client][CMS_group] = -1;
 	g_ClientMenuState[client][CMS_cluster] = -1;
@@ -353,17 +354,17 @@ public OnClientDisconnect(client)
 	// If he was in some zone, guarantee to call the leave callback.
 	RemoveClientFromAllZones(client);
 	
-	new iNumGroups = GetArraySize(g_hZoneGroups);
-	new iNumClusters, iNumZones;
-	new group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
-	for(new i=0;i<iNumGroups;i++)
+	int iNumGroups = g_hZoneGroups.Length;
+	int iNumClusters, iNumZones;
+	int group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
+	for(int i=0;i<iNumGroups;i++)
 	{
 		GetGroupByIndex(i, group);
 		group[ZG_adminShowZones][client] = false;
 		SaveGroup(group);
 		
-		iNumZones = GetArraySize(group[ZG_cluster]);
-		for(new z=0;z<iNumZones;z++)
+		iNumZones = group[ZG_cluster].Length;
+		for(int z=0;z<iNumZones;z++)
 		{
 			GetZoneByIndex(z, group, zoneData);
 			// Doesn't want to see zones anymore.
@@ -373,8 +374,8 @@ public OnClientDisconnect(client)
 		
 		// Client is no longer in any clusters.
 		// Just to make sure.
-		iNumClusters = GetArraySize(group[ZG_cluster]);
-		for(new c=0;c<iNumClusters;c++)
+		iNumClusters = group[ZG_cluster].Length;
+		for(int c=0;c<iNumClusters;c++)
 		{
 			GetZoneClusterByIndex(c, group, zoneCluster);
 			zoneCluster[ZC_clientInZones][client] = 0;
@@ -384,18 +385,18 @@ public OnClientDisconnect(client)
 	}
 }
 
-public Action:OnClientSayCommand(client, const String:command[], const String:sArgs[])
+public Action OnClientSayCommand(int client, const char[] command, const char[] sArgs)
 {
 	if(g_ClientMenuState[client][CMS_rename])
 	{
 		g_ClientMenuState[client][CMS_rename] = false;
 	
-		new group[ZoneGroup];
+		int group[ZoneGroup];
 		GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 		
 		if(g_ClientMenuState[client][CMS_zone] != -1)
 		{
-			new zoneData[ZoneData];
+			int zoneData[ZoneData];
 			GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 			
 			if(!StrContains(sArgs, "!abort"))
@@ -428,7 +429,7 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 		}
 		else if(g_ClientMenuState[client][CMS_cluster] != -1)
 		{
-			new zoneCluster[ZoneCluster];
+			int zoneCluster[ZoneCluster];
 			GetZoneClusterByIndex(g_ClientMenuState[client][CMS_cluster], group, zoneCluster);
 			
 			if(!StrContains(sArgs, "!abort"))
@@ -461,7 +462,7 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 	}
 	else if(g_ClientMenuState[client][CMS_addZone] && g_ClientMenuState[client][CMS_editState] == ZES_name)
 	{
-		new group[ZoneGroup];
+		int group[ZoneGroup];
 		GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 		
 		if(!StrContains(sArgs, "!abort"))
@@ -509,7 +510,7 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 	{
 		// We can get here when adding a cluster through the Cluster List menu from the main menu
 		// or when adding a zone to a cluster and adding a new cluster this zone should be part of right away.
-		new bool:bIsEditingZone = g_ClientMenuState[client][CMS_zone] != -1;
+		bool bIsEditingZone = g_ClientMenuState[client][CMS_zone] != -1;
 		
 		if(!StrContains(sArgs, "!abort"))
 		{
@@ -523,7 +524,7 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 			return Plugin_Handled;
 		}
 		
-		new group[ZoneGroup];
+		int group[ZoneGroup];
 		GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 		
 		// Make sure the cluster name is unique in this group.
@@ -541,14 +542,14 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 		
 		g_ClientMenuState[client][CMS_addCluster] = false;
 		
-		new zoneCluster[ZoneCluster];
+		int zoneCluster[ZoneCluster];
 		AddNewCluster(group, sArgs, zoneCluster);
 		PrintToChat(client, "Map Zones > Added new cluster \"%s\".", zoneCluster[ZC_name]);
 		
 		// Add the currently edited zone to the new cluster right away.
 		if (bIsEditingZone)
 		{
-			new zoneData[ZoneData];
+			int zoneData[ZoneData];
 			GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 
 			PrintToChat(client, "Map Zones > Zone \"%s\" is now part of cluster \"%s\".", zoneData[ZD_name], zoneCluster[ZC_name]);
@@ -575,19 +576,19 @@ public Action:OnClientSayCommand(client, const String:command[], const String:sA
 	return Plugin_Continue;
 }
 
-public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:angles[3], &weapon, &subtype, &cmdnum, &tickcount, &seed, mouse[2])
+public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
 {
-	static s_tickinterval[MAXPLAYERS+1];
+	static int s_tickinterval[MAXPLAYERS+1];
 	
 	// Client is currently editing or adding a zone point.
-	new iRemoveButtons;
+	int iRemoveButtons;
 	if (IsClientEditingZonePosition(client) && !g_ClientMenuState[client][CMS_disablePreview])
 	{
 		// Started pressing +use
 		// See if he wants to set a zone's position.
 		if(buttons & IN_USE && !(g_iClientButtons[client] & IN_USE))
 		{
-			new Float:fUnsnappedOrigin[3], Float:fSnappedOrigin[3], Float:fGroundNormal[3];
+			float fUnsnappedOrigin[3], fSnappedOrigin[3], fGroundNormal[3];
 			GetClientFeetPosition(client, fUnsnappedOrigin, fGroundNormal);
 			
 			// Snap the position to the grid if user wants it.
@@ -603,7 +604,7 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 		// See if he wants to set a zone's position.
 		if(buttons & IN_ATTACK && !(g_iClientButtons[client] & IN_ATTACK))
 		{
-			new Float:fAimPosition[3], Float:fUnsnappedAimPosition[3];
+			float fAimPosition[3], fUnsnappedAimPosition[3];
 			if (GetClientZoneAimPosition(client, fAimPosition, fUnsnappedAimPosition))
 				HandleZonePositionSetting(client, fAimPosition);
 			// Don't let that action go through.
@@ -657,11 +658,11 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 		// Presses +use
 		if(buttons & IN_USE)
 		{
-			new Float:fAngles[3];
+			float fAngles[3];
 			GetClientEyeAngles(client, fAngles);
 			
 			// Only display the laser bbox, if the player moved his mouse.
-			new bool:bChanged;
+			bool bChanged;
 			if(g_ClientMenuState[client][CMS_rotation][1] != fAngles[1])
 				bChanged = true;
 			
@@ -683,18 +684,18 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 			// Change new rotated box, if rotation changed from previous frame.
 			if(bChanged)
 			{
-				new group[ZoneGroup], zoneData[ZoneData];
+				int group[ZoneGroup], zoneData[ZoneData];
 				GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 				GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 				
-				new Float:fPos[3], Float:fMins[3], Float:fMaxs[3];
+				float fPos[3], fMins[3], fMaxs[3];
 				Array_Copy(zoneData[ZD_position], fPos, 3);
 				Array_Copy(zoneData[ZD_mins], fMins, 3);
 				Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
 				Array_Copy(g_ClientMenuState[client][CMS_rotation], fAngles, 3);
 				
 				Effect_DrawBeamBoxRotatableToClient(client, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
-				Effect_DrawAxisOfRotationToClient(client, fPos, fAngles, Float:{20.0,20.0,20.0}, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, 0);
+				Effect_DrawAxisOfRotationToClient(client, fPos, fAngles, view_as<float>({20.0,20.0,20.0}), g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, 0);
 			}
 		}
 		// Show the laser box at the new position for a longer time.
@@ -716,12 +717,12 @@ public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 	return Plugin_Continue;
 }
 
-public ConVar_OnDebugChanged(Handle:convar, const String:oldValue[], const String:newValue[])
+public void ConVar_OnDebugChanged(ConVar convar, const char[] oldValue, const char[] newValue)
 {
-	new bool:bShowZones = GetConVarBool(g_hCVShowZonesDefault);
-	new iSize = GetArraySize(g_hZoneGroups);
-	new group[ZoneGroup];
-	for(new i=0;i<iSize;i++)
+	bool bShowZones = g_hCVShowZonesDefault.BoolValue;
+	int iSize = g_hZoneGroups.Length;
+	int group[ZoneGroup];
+	for(int i=0;i<iSize;i++)
 	{
 		GetGroupByIndex(i, group);
 		group[ZG_showZones] = bShowZones;
@@ -736,14 +737,14 @@ public ConVar_OnDebugChanged(Handle:convar, const String:oldValue[], const Strin
 /**
  * Event callbacks
  */
-public Event_OnRoundStart(Handle:event, const String:name[], bool:dontBroadcast)
+public void Event_OnRoundStart(Event event, const char[] name, bool dontBroadcast)
 {
 	SetupAllGroupZones();
 }
 
-public Event_OnPlayerSpawn(Handle:event, const String:name[], bool:dontBroadcast)
+public void Event_OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast)
 {
-	new client = GetClientOfUserId(GetEventInt(event, "userid"));
+	int client = GetClientOfUserId(event.GetInt("userid"));
 	if(!client)
 		return;
 	
@@ -753,14 +754,14 @@ public Event_OnPlayerSpawn(Handle:event, const String:name[], bool:dontBroadcast
 	// so collision checks with triggers aren't run.
 	// Have them fire the leave callback on all zones they were in before respawning
 	// and have the "OnTrigger" output pickup the new touch.
-	new iNumGroups = GetArraySize(g_hZoneGroups);
-	new iNumZones, group[ZoneGroup], zoneData[ZoneData];
-	new iTrigger;
-	for(new i=0;i<iNumGroups;i++)
+	int iNumGroups = g_hZoneGroups.Length;
+	int iNumZones, group[ZoneGroup], zoneData[ZoneData];
+	int iTrigger;
+	for(int i=0;i<iNumGroups;i++)
 	{
 		GetGroupByIndex(i, group);
-		iNumZones = GetArraySize(group[ZG_zones]);
-		for(new z=0;z<iNumZones;z++)
+		iNumZones = group[ZG_zones].Length;
+		for(int z=0;z<iNumZones;z++)
 		{
 			GetZoneByIndex(z, group, zoneData);
 			if(zoneData[ZD_deleted])
@@ -775,9 +776,9 @@ public Event_OnPlayerSpawn(Handle:event, const String:name[], bool:dontBroadcast
 	}
 }
 
-public Event_OnPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
+public void Event_OnPlayerDeath(Event event, const char[] name, bool dontBroadcast)
 {
-	new client = GetClientOfUserId(GetEventInt(event, "userid"));
+	int client = GetClientOfUserId(event.GetInt("userid"));
 	if(!client)
 		return;
 	
@@ -788,13 +789,13 @@ public Event_OnPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast
 /**
  * Native callbacks
  */
-// native MapZone_RegisterZoneMenu(const String:group[]);
-public Native_RegisterZoneGroup(Handle:plugin, numParams)
+// native void MapZone_RegisterZoneGroup(const char[] group);
+public int Native_RegisterZoneGroup(Handle plugin, int numParams)
 {
-	new String:sName[MAX_ZONE_GROUP_NAME];
+	char sName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sName, sizeof(sName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	// See if there already is a group with that name
 	if(GetGroupByName(sName, group))
 	{
@@ -804,17 +805,17 @@ public Native_RegisterZoneGroup(Handle:plugin, numParams)
 	}
 	
 	strcopy(group[ZG_name][0], MAX_ZONE_GROUP_NAME, sName);
-	group[ZG_zones] = CreateArray(_:ZoneData);
-	group[ZG_cluster] = CreateArray(_:ZoneCluster);
-	group[ZG_showZones] = GetConVarBool(g_hCVShowZonesDefault);
+	group[ZG_zones] = new ArrayList(view_as<int>(ZoneData));
+	group[ZG_cluster] = new ArrayList(view_as<int>(ZoneCluster));
+	group[ZG_showZones] = g_hCVShowZonesDefault.BoolValue;
 	group[ZG_menuCancelForward] = INVALID_HANDLE;
 	group[ZG_filterEntTeam][0] = INVALID_ENT_REFERENCE;
 	group[ZG_filterEntTeam][1] = INVALID_ENT_REFERENCE;
 	// Default to red color.
 	group[ZG_defaultColor][0] = 255;
 	group[ZG_defaultColor][3] = 255;
-	group[ZG_index] = GetArraySize(g_hZoneGroups);
-	PushArrayArray(g_hZoneGroups, group[0], _:ZoneGroup);
+	group[ZG_index] = g_hZoneGroups.Length;
+	g_hZoneGroups.PushArray(group[0], view_as<int>(ZoneGroup));
 	
 	// Load the zone details
 	if (g_hDatabase)
@@ -825,20 +826,20 @@ public Native_RegisterZoneGroup(Handle:plugin, numParams)
 		LoadZoneGroup(group);
 }
 
-// native bool:MapZone_ShowMenu(client, const String:group[]);
-public Native_ShowMenu(Handle:plugin, numParams)
+// bool MapZone_ShowMenu(int client, const char[] group);
+public int Native_ShowMenu(Handle plugin, int numParams)
 {
-	new client = GetNativeCell(1);
+	int client = GetNativeCell(1);
 	if (client <= 0 || client > MaxClients || !IsClientInGame(client))
 	{
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d)", client);
 		return false;
 	}
 
-	new String:sName[MAX_ZONE_GROUP_NAME];
+	char sName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(2, sName, sizeof(sName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sName, group))
 		return false;
 	
@@ -846,32 +847,32 @@ public Native_ShowMenu(Handle:plugin, numParams)
 	return true;
 }
 
-// native MapZone_ShowZoneEditMenu(client, const String:group[], const String:zoneName[], bool:bEnableCancelForward = false);
-public Native_ShowZoneEditMenu(Handle:plugin, numParams)
+// native void MapZone_ShowZoneEditMenu(int client, const char[] group, const char[] zoneName, bool bEnableCancelForward = false);
+public int Native_ShowZoneEditMenu(Handle plugin, int numParams)
 {
-	new client = GetNativeCell(1);
+	int client = GetNativeCell(1);
 	if (client <= 0 || client > MaxClients || !IsClientInGame(client))
 	{
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d)", client);
 		return;
 	}
 
-	new String:sName[MAX_ZONE_GROUP_NAME];
+	char sName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(2, sName, sizeof(sName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sName, group))
 	{
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid map group name \"%s\"", sName);
 		return;
 	}
 	
-	new bool:bEnableCancelForward = bool:GetNativeCell(3);
+	bool bEnableCancelForward = view_as<bool>(GetNativeCell(3));
 	
 	// Show the right edit menu for that zone or cluster.
-	new String:sZoneName[MAX_ZONE_NAME];
+	char sZoneName[MAX_ZONE_NAME];
 	GetNativeString(3, sZoneName, sizeof(sZoneName));
-	new zoneCluster[ZoneCluster], zoneData[ZoneData];
+	int zoneCluster[ZoneCluster], zoneData[ZoneData];
 	if (GetZoneClusterByName(sZoneName, group, zoneCluster))
 	{
 		g_ClientMenuState[client][CMS_group] = group[ZG_index];
@@ -893,16 +894,16 @@ public Native_ShowZoneEditMenu(Handle:plugin, numParams)
 	g_ClientMenuState[client][CMS_backToMenuAfterEdit] = bEnableCancelForward;
 }
 
-// native bool:MapZone_SetZoneDefaultColor(const String:group[], const iColor[4]);
-public Native_SetZoneDefaultColor(Handle:plugin, numParams)
+// native bool MapZone_SetZoneDefaultColor(const char[] group, const int iColor[4]);
+public int Native_SetZoneDefaultColor(Handle plugin, int numParams)
 {
-	new String:sName[MAX_ZONE_GROUP_NAME];
+	char sName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sName, sizeof(sName));
 	
-	new iColor[4];
+	int iColor[4];
 	GetNativeArray(2, iColor, 4);
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sName, group))
 		return false;
 	
@@ -912,24 +913,24 @@ public Native_SetZoneDefaultColor(Handle:plugin, numParams)
 	return true;
 }
 
-// native bool:MapZone_SetZoneColor(const String:group[], const String:zoneName[], const iColor[4]);
-public Native_SetZoneColor(Handle:plugin, numParams)
+// native bool MapZone_SetZoneColor(const char[] group, const char[] zoneName, const int iColor[4]);
+public int Native_SetZoneColor(Handle plugin, int numParams)
 {
-	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	char sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sGroupName, sizeof(sGroupName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
 		return false;
 	
-	new String:sZoneName[MAX_ZONE_NAME];
+	char sZoneName[MAX_ZONE_NAME];
 	GetNativeString(2, sZoneName, sizeof(sZoneName));
 	
-	new iColor[4];
+	int iColor[4];
 	GetNativeArray(3, iColor, 4);
 	
 	// Find a matching cluster or zone.
-	new zoneCluster[ZoneCluster], zoneData[ZoneData];
+	int zoneCluster[ZoneCluster], zoneData[ZoneData];
 	if (GetZoneClusterByName(sZoneName, group, zoneCluster))
 	{
 		Array_Copy(iColor, zoneCluster[ZC_color], 4);
@@ -946,38 +947,38 @@ public Native_SetZoneColor(Handle:plugin, numParams)
 	return false;
 }
 
-// native bool:MapZone_SetClientZoneVisibility(const String:group[], const String:zoneName[], client, bool bVisible);
-public Native_SetClientZoneVisibility(Handle:plugin, numParams)
+// native bool MapZone_SetClientZoneVisibility(const char[] group, const char[] zoneName, int client, bool bVisible);
+public int Native_SetClientZoneVisibility(Handle plugin, int numParams)
 {
-	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	char sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sGroupName, sizeof(sGroupName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
 		return false;
 	
-	new String:sZoneName[MAX_ZONE_NAME];
+	char sZoneName[MAX_ZONE_NAME];
 	GetNativeString(2, sZoneName, sizeof(sZoneName));
 	
-	new client = GetNativeCell(3);
+	int client = GetNativeCell(3);
 	if (client <= 0 || client > MaxClients || !IsClientInGame(client))
 	{
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d)", client);
 		return false;
 	}
 	
-	new bool:bVisible = bool:GetNativeCell(4);
+	bool bVisible = view_as<bool>(GetNativeCell(4));
 	
 	// Find a matching cluster or zone.
-	new zoneCluster[ZoneCluster], zoneData[ZoneData];
+	int zoneCluster[ZoneCluster], zoneData[ZoneData];
 	if (GetZoneClusterByName(sZoneName, group, zoneCluster))
 	{
 		zoneCluster[ZC_adminShowZones][client] = bVisible;
 		SaveCluster(group, zoneCluster);
 		
 		// Set all zones of this cluster to the same state.
-		new iNumZones = GetArraySize(group[ZG_zones]);
-		for(new i=0;i<iNumZones;i++)
+		int iNumZones = group[ZG_zones].Length;
+		for(int i=0;i<iNumZones;i++)
 		{
 			GetZoneByIndex(i, group, zoneData);
 			if(zoneData[ZD_deleted])
@@ -1002,28 +1003,23 @@ public Native_SetClientZoneVisibility(Handle:plugin, numParams)
 	return false;
 }
 
-// native bool:MapZone_SetMenuCancelAction(const String:group[], MapZoneMenuCancelCB:callback);
-public Native_SetMenuCancelAction(Handle:plugin, numParams)
+// native bool MapZone_SetMenuCancelAction(const char[] group, MapZoneMenuCancelCB callback);
+public int Native_SetMenuCancelAction(Handle plugin, int numParams)
 {
-	new String:sName[MAX_ZONE_GROUP_NAME];
+	char sName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sName, sizeof(sName));
+	Function callback = GetNativeFunction(2);
 	
-#if SOURCEMOD_V_MAJOR >= 1 && SOURCEMOD_V_MINOR >= 7
-	new MapZoneMenuCancelCB:callback = MapZoneMenuCancelCB:GetNativeFunction(2);
-#else
-	new MapZoneMenuCancelCB:callback = MapZoneMenuCancelCB:GetNativeCell(2);
-#endif
-	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sName, group))
 		return false;
 	
 	// Someone registered a menu back action before. Overwrite it.
 	if(group[ZG_menuCancelForward] != INVALID_HANDLE)
 		// Private forwards don't allow to just clear all functions from the list. You HAVE to give the plugin handle -.-
-		CloseHandle(group[ZG_menuCancelForward]);
+		delete group[ZG_menuCancelForward];
 	
-	// functag public MapZoneMenuCancelCB(client, reason, const String:group[]);
+	// typedef MapZoneMenuCancelCB = function void(int client, int reason, const char[] group);
 	group[ZG_menuCancelForward] = CreateForward(ET_Ignore, Param_Cell, Param_Cell, Param_String);
 	AddToForward(group[ZG_menuCancelForward], plugin, callback);
 	SaveGroup(group);
@@ -1031,27 +1027,27 @@ public Native_SetMenuCancelAction(Handle:plugin, numParams)
 	return true;
 }
 
-// native MapZone_StartAddingZone(client, const String:group[], const String:sZoneName[] = "", bool:bEnableCancelForward = false, const String:sClusterName[] = "");
-public Native_StartAddingZone(Handle:plugin, numParams)
+// native void MapZone_StartAddingZone(int client, const char[] group, const char[] sZoneName = "", bool bEnableCancelForward = false, const char[] sClusterName = "");
+public int Native_StartAddingZone(Handle plugin, int numParams)
 {
-	new client = GetNativeCell(1);
+	int client = GetNativeCell(1);
 	if (client <= 0 || client > MaxClients || !IsClientInGame(client))
 	{
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d)", client);
 		return;
 	}
 	
-	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	char sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(2, sGroupName, sizeof(sGroupName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
 	{
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid zone group name \"%s\"", sGroupName);
 		return;
 	}
 	
-	new String:sZoneName[MAX_ZONE_NAME];
+	char sZoneName[MAX_ZONE_NAME];
 	GetNativeString(3, sZoneName, sizeof(sZoneName));
 	if(ZoneExistsWithName(group, sZoneName))
 	{
@@ -1065,14 +1061,14 @@ public Native_StartAddingZone(Handle:plugin, numParams)
 		return;
 	}
 	
-	new bool:bEnableCancelForward = bool:GetNativeCell(4);
-	new String:sClusterName[MAX_ZONE_NAME];
+	bool bEnableCancelForward = view_as<bool>(GetNativeCell(4));
+	char sClusterName[MAX_ZONE_NAME];
 	GetNativeString(5, sClusterName, sizeof(sClusterName));
 	
 	// If there is a cluster name provided, add the new zone to that right away.
 	if (sClusterName[0])
 	{
-		new zoneCluster[ZoneCluster];
+		int zoneCluster[ZoneCluster];
 		if (!GetZoneClusterByName(sClusterName, group, zoneCluster))
 		{
 			ThrowNativeError(SP_ERROR_NATIVE, "Invalid cluster name \"%s\"", sClusterName);
@@ -1091,18 +1087,18 @@ public Native_StartAddingZone(Handle:plugin, numParams)
 	StartZoneAdding(client);
 }
 
-// native MapZone_AddCluster(const String:group[], const String:sClusterName[], iAdmin=0);
-public Native_AddCluster(Handle:plugin, numParams)
+// native void MapZone_AddCluster(const char[] group, const char[] sClusterName, int iAdmin=0);
+public int Native_AddCluster(Handle plugin, int numParams)
 {
-	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	char sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sGroupName, sizeof(sGroupName));
 	
-	new String:sClusterName[MAX_ZONE_NAME];
+	char sClusterName[MAX_ZONE_NAME];
 	GetNativeString(2, sClusterName, sizeof(sClusterName));
 	
-	new iAdmin = GetNativeCell(3);
+	int iAdmin = GetNativeCell(3);
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
 	{
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid zone group name \"%s\"", sGroupName);
@@ -1128,23 +1124,23 @@ public Native_AddCluster(Handle:plugin, numParams)
 		return;
 	}
 	
-	new zoneCluster[ZoneCluster];
+	int zoneCluster[ZoneCluster];
 	AddNewCluster(group, sClusterName, zoneCluster);
 	
 	// Inform other plugins that this cluster is now a thing.
 	CallOnClusterCreated(group, zoneCluster, iAdmin);
 }
 
-// native bool:MapZone_ZoneExists(const String:group[], const String:zoneName[]);
-public Native_ZoneExists(Handle:plugin, numParams)
+// native bool MapZone_ZoneExists(const char[] group, const char[] zoneName);
+public int Native_ZoneExists(Handle plugin, int numParams)
 {
-	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	char sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sGroupName, sizeof(sGroupName));
 	
-	new String:sZoneName[MAX_ZONE_NAME];
+	char sZoneName[MAX_ZONE_NAME];
 	GetNativeString(2, sZoneName, sizeof(sZoneName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
 		return false;
 	
@@ -1157,30 +1153,30 @@ public Native_ZoneExists(Handle:plugin, numParams)
 	return false;
 }
 
-// native MapZone_GetZoneIndex(const String:group[], const String:zoneName[], &MapZoneType:mapZoneType);
-public Native_GetZoneIndex(Handle:plugin, numParams)
+// native int MapZone_GetZoneIndex(const char[] group, const char[] zoneName, MapZoneType &mapZoneType);
+public int Native_GetZoneIndex(Handle plugin, int numParams)
 {
-	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	char sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sGroupName, sizeof(sGroupName));
 	
-	new String:sZoneName[MAX_ZONE_NAME];
+	char sZoneName[MAX_ZONE_NAME];
 	GetNativeString(2, sZoneName, sizeof(sZoneName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
 	{
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid group name \"%s\"", sGroupName);
 		return -1;
 	}
 	
-	new zoneData[ZoneData];
+	int zoneData[ZoneData];
 	if(GetZoneByName(sZoneName, group, zoneData))
 	{
 		SetNativeCellRef(3, MapZoneType_Zone);
 		return zoneData[ZD_index];
 	}
 	
-	new zoneCluster[ZoneCluster];
+	int zoneCluster[ZoneCluster];
 	if(GetZoneClusterByName(sZoneName, group, zoneCluster))
 	{
 		SetNativeCellRef(3, MapZoneType_Cluster);
@@ -1191,34 +1187,34 @@ public Native_GetZoneIndex(Handle:plugin, numParams)
 	return -1;
 }
 
-// native bool:MapZone_GetZoneNameByIndex(const String:group[], zoneIndex, MapZoneType:mapZoneType, String:zoneName[], maxlen);
-public Native_GetZoneNameByIndex(Handle:plugin, numParams)
+// native bool MapZone_GetZoneNameByIndex(const char[] group, int zoneIndex, MapZoneType mapZoneType, char[] zoneName, int maxlen);
+public int Native_GetZoneNameByIndex(Handle plugin, int numParams)
 {
-	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	char sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sGroupName, sizeof(sGroupName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
 	{
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid group name \"%s\"", sGroupName);
 		return false;
 	}
 	
-	new iZoneIndex = GetNativeCell(2);
-	new MapZoneType:iZoneType = MapZoneType:GetNativeCell(3);
-	new iMaxlen = GetNativeCell(5);
+	int iZoneIndex = GetNativeCell(2);
+	MapZoneType iZoneType = view_as<MapZoneType>(GetNativeCell(3));
+	int iMaxlen = GetNativeCell(5);
 	
 	switch (iZoneType)
 	{
 		case MapZoneType_Zone:
 		{
-			if (iZoneIndex < 0 || iZoneIndex >= GetArraySize(group[ZG_zones]))
+			if (iZoneIndex < 0 || iZoneIndex >= group[ZG_zones].Length)
 			{
 				ThrowNativeError(SP_ERROR_NATIVE, "Invalid zone index %d", iZoneIndex);
 				return false;
 			}
 			
-			new zoneData[ZoneData];
+			int zoneData[ZoneData];
 			GetZoneByIndex(iZoneIndex, group, zoneData);
 			if (zoneData[ZD_deleted])
 				return false;
@@ -1227,13 +1223,13 @@ public Native_GetZoneNameByIndex(Handle:plugin, numParams)
 		}
 		case MapZoneType_Cluster:
 		{
-			if (iZoneIndex < 0 || iZoneIndex >= GetArraySize(group[ZG_cluster]))
+			if (iZoneIndex < 0 || iZoneIndex >= group[ZG_cluster].Length)
 			{
 				ThrowNativeError(SP_ERROR_NATIVE, "Invalid cluster index %d", iZoneIndex);
 				return false;
 			}
 			
-			new zoneCluster[ZoneCluster];
+			int zoneCluster[ZoneCluster];
 			GetZoneClusterByIndex(iZoneIndex, group, zoneCluster);
 			if (zoneCluster[ZC_deleted])
 				return false;
@@ -1250,23 +1246,23 @@ public Native_GetZoneNameByIndex(Handle:plugin, numParams)
 	return true;
 }
 
-// native Handle:MapZone_GetGroupZones(const String:group[], bool:bIncludeClusters=true);
-public Native_GetGroupZones(Handle:plugin, numParams)
+// native ArrayList MapZone_GetGroupZones(const char[] group, bool bIncludeClusters=true);
+public int Native_GetGroupZones(Handle plugin, int numParams)
 {
-	new String:sName[MAX_ZONE_GROUP_NAME];
+	char sName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sName, sizeof(sName));
 	
-	new bool:bIncludeClusters = bool:GetNativeCell(2);
+	bool bIncludeClusters = view_as<bool>(GetNativeCell(2));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sName, group))
-		return _:INVALID_HANDLE;
+		return view_as<int>(INVALID_HANDLE);
 	
-	new Handle:hZones = CreateArray(ByteCountToCells(MAX_ZONE_NAME));
+	ArrayList hZones = new ArrayList(ByteCountToCells(MAX_ZONE_NAME));
 	// Push all regular zone names
-	new iSize = GetArraySize(group[ZG_zones]);
-	new zoneData[ZoneData];
-	for(new i=0;i<iSize;i++)
+	int iSize = group[ZG_zones].Length;
+	int zoneData[ZoneData];
+	for(int i=0;i<iSize;i++)
 	{
 		GetZoneByIndex(i, group, zoneData);
 		if(zoneData[ZD_deleted])
@@ -1276,41 +1272,41 @@ public Native_GetGroupZones(Handle:plugin, numParams)
 		if(zoneData[ZD_clusterIndex] != -1)
 			continue;
 		
-		PushArrayString(hZones, zoneData[ZD_name]);
+		hZones.PushString(zoneData[ZD_name]);
 	}
 	
 	// Only add clusters, if we're told so.
 	if(bIncludeClusters)
 	{
 		// And all clusters
-		new zoneCluster[ZoneCluster];
-		iSize = GetArraySize(group[ZG_cluster]);
-		for(new i=0;i<iSize;i++)
+		int zoneCluster[ZoneCluster];
+		iSize = group[ZG_cluster].Length;
+		for(int i=0;i<iSize;i++)
 		{
 			GetZoneClusterByIndex(i, group, zoneCluster);
 			if(zoneCluster[ZC_deleted])
 				continue;
 			
-			PushArrayString(hZones, zoneCluster[ZC_name]);
+			hZones.PushString(zoneCluster[ZC_name]);
 		}
 	}
 	
-	new Handle:hReturn = CloneHandle(hZones, plugin);
-	CloseHandle(hZones);
+	Handle hReturn = CloneHandle(hZones, plugin);
+	delete hZones;
 	
-	return _:hReturn;
+	return view_as<int>(hReturn);
 }
 
-// native MapZoneType:MapZone_GetZoneType(const String:group[], const String:zoneName[]);
-public Native_GetZoneType(Handle:plugin, numParams)
+// native MapZoneType MapZone_GetZoneType(const char[] group, const char[] zoneName);
+public int Native_GetZoneType(Handle plugin, int numParams)
 {
-	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	char sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sGroupName, sizeof(sGroupName));
 	
-	new String:sZoneName[MAX_ZONE_NAME];
+	char sZoneName[MAX_ZONE_NAME];
 	GetNativeString(2, sZoneName, sizeof(sZoneName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
 	{
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid group name \"%s\"", sGroupName);
@@ -1318,36 +1314,36 @@ public Native_GetZoneType(Handle:plugin, numParams)
 	}
 	
 	if(ClusterExistsWithName(group, sZoneName))
-		return _:MapZoneType_Cluster;
+		return view_as<int>(MapZoneType_Cluster);
 	else if(ZoneExistsWithName(group, sZoneName))
-		return _:MapZoneType_Zone;
+		return view_as<int>(MapZoneType_Zone);
 	
 	ThrowNativeError(SP_ERROR_NATIVE, "No zone or cluster with name \"%s\" in group \"%s\".", sZoneName, sGroupName);
 	return 0;
 }
 
-// native Handle:MapZone_GetClusterZones(const String:group[], const String:clusterName[]);
-public Native_GetClusterZones(Handle:plugin, numParams)
+// native ArrayList MapZone_GetClusterZones(const char[] group, const char[] clusterName);
+public int Native_GetClusterZones(Handle plugin, int numParams)
 {
-	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	char sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sGroupName, sizeof(sGroupName));
 	
-	new String:sClusterName[MAX_ZONE_NAME];
+	char sClusterName[MAX_ZONE_NAME];
 	GetNativeString(2, sClusterName, sizeof(sClusterName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
-		return _:INVALID_HANDLE;
+		return view_as<int>(INVALID_HANDLE);
 	
-	new zoneCluster[ZoneCluster];
+	int zoneCluster[ZoneCluster];
 	if(!GetZoneClusterByName(sClusterName, group, zoneCluster))
-		return _:INVALID_HANDLE;
+		return view_as<int>(INVALID_HANDLE);
 	
-	new Handle:hZones = CreateArray(ByteCountToCells(MAX_ZONE_NAME));
+	ArrayList hZones = new ArrayList(ByteCountToCells(MAX_ZONE_NAME));
 	// Push all names of zones in this cluster
-	new iSize = GetArraySize(group[ZG_zones]);
-	new zoneData[ZoneData];
-	for(new i=0;i<iSize;i++)
+	int iSize = group[ZG_zones].Length;
+	int zoneData[ZoneData];
+	for(int i=0;i<iSize;i++)
 	{
 		GetZoneByIndex(i, group, zoneData);
 		if(zoneData[ZD_deleted])
@@ -1357,32 +1353,32 @@ public Native_GetClusterZones(Handle:plugin, numParams)
 		if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
 			continue;
 		
-		PushArrayArray(hZones, _:zoneData[ZD_name], ByteCountToCells(MAX_ZONE_NAME));
+		hZones.PushArray(view_as<int>(zoneData[ZD_name]), ByteCountToCells(MAX_ZONE_NAME));
 	}
 	
-	new Handle:hReturn = CloneHandle(hZones, plugin);
-	CloseHandle(hZones);
+	Handle hReturn = CloneHandle(hZones, plugin);
+	delete hZones;
 	
-	return _:hReturn;
+	return view_as<int>(hReturn);
 }
 
-// native bool:MapZone_GetClusterNameOfZone(const String:group[], const String:zoneName[], String:clusterName[], maxlen);
-public Native_GetClusterNameOfZone(Handle:plugin, numParams)
+// native bool MapZone_GetClusterNameOfZone(const char[] group, const char[] zoneName, char[] clusterName, int maxlen);
+public int Native_GetClusterNameOfZone(Handle plugin, int numParams)
 {
-	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	char sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sGroupName, sizeof(sGroupName));
 	
-	new String:sZoneName[MAX_ZONE_NAME];
+	char sZoneName[MAX_ZONE_NAME];
 	GetNativeString(2, sZoneName, sizeof(sZoneName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
 	{
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid group name \"%s\"", sGroupName);
 		return 0;
 	}
 	
-	new zoneData[ZoneData];
+	int zoneData[ZoneData];
 	if(!GetZoneByName(sZoneName, group, zoneData))
 	{
 		ThrowNativeError(SP_ERROR_NATIVE, "No zone \"%s\" in group \"%s\"", sZoneName, sGroupName);
@@ -1393,31 +1389,31 @@ public Native_GetClusterNameOfZone(Handle:plugin, numParams)
 	if (zoneData[ZD_clusterIndex] == -1)
 		return 0;
 	
-	new zoneCluster[ZoneCluster];
+	int zoneCluster[ZoneCluster];
 	GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
 	// Better be save than sorry.
 	if (zoneCluster[ZC_deleted])
 		return 0;
 	
 	// Return the cluster name.
-	new iMaxlen = GetNativeCell(4);
+	int iMaxlen = GetNativeCell(4);
 	SetNativeString(3, zoneCluster[ZC_name], iMaxlen);
 	return 1;
 }
 
-// native bool:MapZone_SetZoneName(const String:group[], const String:sOldName[], const String:sNewName[]);
-public Native_SetZoneName(Handle:plugin, numParams)
+// native bool MapZone_SetZoneName(const char[] group, const char[] sOldName, const char[] sNewName);
+public int Native_SetZoneName(Handle plugin, int numParams)
 {
-	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	char sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sGroupName, sizeof(sGroupName));
 	
-	new String:sCurrentName[MAX_ZONE_NAME];
+	char sCurrentName[MAX_ZONE_NAME];
 	GetNativeString(2, sCurrentName, sizeof(sCurrentName));
 	
-	new String:sNewName[MAX_ZONE_NAME];
+	char sNewName[MAX_ZONE_NAME];
 	GetNativeString(3, sNewName, sizeof(sNewName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
 	{
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid group name \"%s\"", sGroupName);
@@ -1425,8 +1421,8 @@ public Native_SetZoneName(Handle:plugin, numParams)
 	}
 	
 	// Get the data structure of the zone by the old name.
-	new MapZoneType:iZoneType;
-	new zoneData[ZoneData], zoneCluster[ZoneCluster];
+	MapZoneType iZoneType;
+	int zoneData[ZoneData], zoneCluster[ZoneCluster];
 	if (GetZoneByName(sCurrentName, group, zoneData))
 	{
 		iZoneType = MapZoneType_Zone;
@@ -1459,16 +1455,16 @@ public Native_SetZoneName(Handle:plugin, numParams)
 	return true;
 }
 
-// native MapZone_GetZonePosition(const String:group[], const String:sZoneName[], Float:fCenter[3]);
-public Native_GetZonePosition(Handle:plugin, numParams)
+// native void MapZone_GetZonePosition(const char[] group, const char[] sZoneName, float fCenter[3]);
+public int Native_GetZonePosition(Handle plugin, int numParams)
 {
-	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	char sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sGroupName, sizeof(sGroupName));
 	
-	new String:sZoneName[MAX_ZONE_NAME];
+	char sZoneName[MAX_ZONE_NAME];
 	GetNativeString(2, sZoneName, sizeof(sZoneName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
 	{
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid group name \"%s\"", sGroupName);
@@ -1476,8 +1472,8 @@ public Native_GetZonePosition(Handle:plugin, numParams)
 	}
 	
 	// Get the center position of the zone or cluster.
-	new Float:fCenter[3];
-	new zoneData[ZoneData];
+	float fCenter[3];
+	int zoneData[ZoneData];
 	if (GetZoneByName(sZoneName, group, zoneData))
 	{
 		Array_Copy(zoneData[ZD_position], fCenter, sizeof(fCenter));
@@ -1495,22 +1491,22 @@ public Native_GetZonePosition(Handle:plugin, numParams)
 	SetNativeArray(3, fCenter, 3);
 }
 
-// native bool:MapZone_GetCustomString(const String:group[], const String:zoneName[], const String:key[], String:value[], maxlen);
-public Native_GetCustomString(Handle:plugin, numParams)
+// native bool MapZone_GetCustomString(const char[] group, const char[] zoneName, const char[] key, char[] value, int maxlen);
+public int Native_GetCustomString(Handle plugin, int numParams)
 {
-	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	char sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sGroupName, sizeof(sGroupName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
 		return false;
 	
-	new String:sZoneName[MAX_ZONE_NAME];
+	char sZoneName[MAX_ZONE_NAME];
 	GetNativeString(2, sZoneName, sizeof(sZoneName));
 	
 	// Find a matching cluster or zone.
-	new zoneCluster[ZoneCluster], zoneData[ZoneData];
-	new Handle:hCustomKV;
+	int zoneCluster[ZoneCluster], zoneData[ZoneData];
+	StringMap hCustomKV;
 	if (GetZoneClusterByName(sZoneName, group, zoneCluster))
 	{
 		hCustomKV = zoneCluster[ZC_customKV];
@@ -1524,12 +1520,12 @@ public Native_GetCustomString(Handle:plugin, numParams)
 	if (!hCustomKV)
 		return false;
 	
-	new String:sKey[128];
+	char sKey[128];
 	GetNativeString(3, sKey, sizeof(sKey));
-	new maxlen = GetNativeCell(5);
+	int maxlen = GetNativeCell(5);
 	
-	new String:sValue[maxlen];
-	if (!GetTrieString(hCustomKV, sKey, sValue, maxlen))
+	char[] sValue = new char[maxlen];
+	if (!hCustomKV.GetString(sKey, sValue, maxlen))
 		return false;
 	
 	SetNativeString(4, sValue, maxlen);
@@ -1537,26 +1533,26 @@ public Native_GetCustomString(Handle:plugin, numParams)
 	return true;
 }
 
-// native bool:MapZone_SetCustomString(const String:group[], const String:zoneName[], const String:key[], const String:value[]);
-public Native_SetCustomString(Handle:plugin, numParams)
+// native bool MapZone_SetCustomString(const char[] group, const char[] zoneName, const char[] key, const char[] value);
+public int Native_SetCustomString(Handle plugin, int numParams)
 {
-	new String:sGroupName[MAX_ZONE_GROUP_NAME];
+	char sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sGroupName, sizeof(sGroupName));
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	if(!GetGroupByName(sGroupName, group))
 		return false;
 	
-	new String:sZoneName[MAX_ZONE_NAME];
+	char sZoneName[MAX_ZONE_NAME];
 	GetNativeString(2, sZoneName, sizeof(sZoneName));
 	
 	// Find a matching cluster or zone.
-	new zoneCluster[ZoneCluster], zoneData[ZoneData];
-	new Handle:hCustomKV;
+	int zoneCluster[ZoneCluster], zoneData[ZoneData];
+	StringMap hCustomKV;
 	if (GetZoneClusterByName(sZoneName, group, zoneCluster))
 	{
 		if (!zoneCluster[ZC_customKV])
-			zoneCluster[ZC_customKV] = CreateTrie();
+			zoneCluster[ZC_customKV] = new StringMap();
 		
 		hCustomKV = zoneCluster[ZC_customKV];
 		zoneCluster[ZC_customKVChanged] = true;
@@ -1565,7 +1561,7 @@ public Native_SetCustomString(Handle:plugin, numParams)
 	else if (GetZoneByName(sZoneName, group, zoneData))
 	{
 		if (!zoneData[ZD_customKV])
-			zoneData[ZD_customKV] = CreateTrie();
+			zoneData[ZD_customKV] = new StringMap();
 		
 		hCustomKV = zoneData[ZD_customKV];
 		zoneData[ZD_customKVChanged] = true;
@@ -1576,45 +1572,45 @@ public Native_SetCustomString(Handle:plugin, numParams)
 	if (!hCustomKV)
 		return false;
 	
-	new String:sKey[128], String:sValue[256];
+	char sKey[128], sValue[256];
 	GetNativeString(3, sKey, sizeof(sKey));
 	GetNativeString(4, sValue, sizeof(sValue));
 	
 	// Don't save empty values. Just remove the key then.
 	if (sValue[0] == '\0')
-		return RemoveFromTrie(hCustomKV, sKey);
+		return hCustomKV.Remove(sKey);
 
-	return SetTrieString(hCustomKV, sKey, sValue);
+	return hCustomKV.SetString(sKey, sValue);
 }
 
 /**
  * Entity output handler
  */
-public EntOut_OnTouchEvent(const String:output[], caller, activator, Float:delay)
+public void EntOut_OnTouchEvent(const char[] output, int caller, int activator, float delay)
 {
 	// Ignore invalid touches
 	if(activator < 1 || activator > MaxClients)
 		return;
 
 	// Get the targetname
-	decl String:sTargetName[64];
+	char sTargetName[64];
 	GetEntPropString(caller, Prop_Data, "m_iName", sTargetName, sizeof(sTargetName));
 	
-	new iGroupIndex, iZoneIndex;
+	int iGroupIndex, iZoneIndex;
 	if(!ExtractIndicesFromString(sTargetName, iGroupIndex, iZoneIndex))
 		return;
 	
 	// This zone shouldn't exist!
-	if(iGroupIndex >= GetArraySize(g_hZoneGroups))
+	if(iGroupIndex >= g_hZoneGroups.Length)
 	{
 		AcceptEntityInput(caller, "Kill");
 		return;
 	}
 	
-	new group[ZoneGroup], zoneData[ZoneData];
+	int group[ZoneGroup], zoneData[ZoneData];
 	GetGroupByIndex(iGroupIndex, group);
 	
-	if(iZoneIndex >= GetArraySize(group[ZG_zones]))
+	if(iZoneIndex >= group[ZG_zones].Length)
 	{
 		AcceptEntityInput(caller, "Kill");
 		return;
@@ -1629,7 +1625,7 @@ public EntOut_OnTouchEvent(const String:output[], caller, activator, Float:delay
 		return;
 	}
 	
-	new bool:bEnteredZone = StrEqual(output, "OnStartTouch") || StrEqual(output, "OnTrigger");
+	bool bEnteredZone = StrEqual(output, "OnStartTouch") || StrEqual(output, "OnTrigger");
 	
 	// Remember this player interacted with this zone.
 	// IT'S IMPORTANT TO MAKE SURE WE REALLY CALL OnEndTouch ON ALL POSSIBLE EVENTS.
@@ -1650,14 +1646,14 @@ public EntOut_OnTouchEvent(const String:output[], caller, activator, Float:delay
 	SaveZone(group, zoneData);
 	
 	// Is this zone part of a cluster?
-	new String:sZoneName[MAX_ZONE_NAME];
+	char sZoneName[MAX_ZONE_NAME];
 	strcopy(sZoneName, sizeof(sZoneName), zoneData[ZD_name]);
 	if(zoneData[ZD_clusterIndex] != -1)
 	{
-		new zoneCluster[ZoneCluster];
+		int zoneCluster[ZoneCluster];
 		GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
 		
-		new bool:bFireForward;
+		bool bFireForward;
 		
 		// Player entered a zone of this cluster.
 		if(bEnteredZone)
@@ -1710,27 +1706,28 @@ public EntOut_OnTouchEvent(const String:output[], caller, activator, Float:delay
 /**
  * Timer callbacks
  */
-public Action:Timer_ShowZones(Handle:timer)
+public Action Timer_ShowZones(Handle timer)
 {
-	new Float:fDistanceLimit = GetConVarFloat(g_hCVDebugBeamDistance);
+	float fDistanceLimit = g_hCVDebugBeamDistance.FloatValue;
 
-	new iNumGroups = GetArraySize(g_hZoneGroups);
-	new group[ZoneGroup], zoneCluster[ZoneCluster], zoneData[ZoneData], iNumZones;
-	new Float:fPos[3], Float:fMins[3], Float:fMaxs[3], Float:fAngles[3];
-	new iClients[MaxClients], iNumClients;
-	new iDefaultColor[4], iColor[4];
+	int iNumGroups = g_hZoneGroups.Length;
+	int group[ZoneGroup], zoneCluster[ZoneCluster], zoneData[ZoneData], iNumZones;
+	float fPos[3], fMins[3], fMaxs[3], fAngles[3];
+	int[] iClients = new int[MaxClients];
+	int iNumClients;
+	int iDefaultColor[4], iColor[4];
 	
-	new bool:bOptimizeBeams = GetConVarBool(g_hCVOptimizeBeams);
+	bool bOptimizeBeams = g_hCVOptimizeBeams.BoolValue;
 	
-	new Float:vFirstPoint[3], Float:vSecondPoint[3];
-	new Float:fClientAngles[3], Float:fClientEyePosition[3], Float:fClientToZonePoint[3], Float:fLength;
-	for(new i=0;i<iNumGroups;i++)
+	float vFirstPoint[3], vSecondPoint[3];
+	float fClientAngles[3], fClientEyePosition[3], fClientToZonePoint[3], fLength;
+	for(int i=0;i<iNumGroups;i++)
 	{
 		GetGroupByIndex(i, group);
 		
 		Array_Copy(group[ZG_defaultColor], iDefaultColor, 4);
-		iNumZones = GetArraySize(group[ZG_zones]);
-		for(new z=0;z<iNumZones;z++)
+		iNumZones = group[ZG_zones].Length;
+		for(int z=0;z<iNumZones;z++)
 		{
 			GetZoneByIndex(z, group, zoneData);
 			if(zoneData[ZD_deleted])
@@ -1772,7 +1769,7 @@ public Action:Timer_ShowZones(Handle:timer)
 			}
 			
 			iNumClients = 0;
-			for(new c=1;c<=MaxClients;c++)
+			for(int c=1;c<=MaxClients;c++)
 			{
 				if(!IsClientInGame(c) || IsFakeClient(c))
 					continue;
@@ -1826,7 +1823,7 @@ public Action:Timer_ShowZones(Handle:timer)
 	}
 	
 	
-	for(new i=1;i<=MaxClients;i++)
+	for(int i=1;i<=MaxClients;i++)
 	{
 		if(g_ClientMenuState[i][CMS_editPosition]
 		|| g_ClientMenuState[i][CMS_editRotation]
@@ -1884,16 +1881,16 @@ public Action:Timer_ShowZones(Handle:timer)
 			
 			// Draw the zone
 			Effect_DrawBeamBoxRotatableToClient(i, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
-			Effect_DrawAxisOfRotationToClient(i, fPos, fAngles, Float:{20.0,20.0,20.0}, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, 0);
+			Effect_DrawAxisOfRotationToClient(i, fPos, fAngles, view_as<float>({20.0,20.0,20.0}), g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, 0);
 		}
 	}
 	
 	return Plugin_Continue;
 }
 
-public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
+public Action Timer_ShowZoneWhileAdding(Handle timer, any userid)
 {
-	new client = GetClientOfUserId(userid);
+	int client = GetClientOfUserId(userid);
 	if (!client)
 		return Plugin_Stop;
 	
@@ -1903,7 +1900,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 		// Keep drawing the new zone while he enters a name for it.
 		if (g_ClientMenuState[client][CMS_addZone])
 		{
-			new Float:fFirstPoint[3], Float:fSecondPoint[3];
+			float fFirstPoint[3], fSecondPoint[3];
 			Array_Copy(g_ClientMenuState[client][CMS_first], fFirstPoint, 3);
 			Array_Copy(g_ClientMenuState[client][CMS_second], fSecondPoint, 3);
 			
@@ -1917,7 +1914,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 		return Plugin_Continue;
 	
 	// Get the client's aim position.
-	new Float:fAimPosition[3], Float:fUnsnappedAimPosition[3];
+	float fAimPosition[3], fUnsnappedAimPosition[3];
 	if (!GetClientZoneAimPosition(client, fAimPosition, fUnsnappedAimPosition))
 		return Plugin_Continue;
 	
@@ -1930,7 +1927,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 	
 	// Get the snapped and unsnapped target positions now.
 	// Unsnapped, so we can draw a line between the points to show the user where it'll snap to.
-	new Float:fTargetPosition[3], Float:fUnsnappedTargetPosition[3];
+	float fTargetPosition[3], fUnsnappedTargetPosition[3];
 	if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
 	{
 		fTargetPosition = fAimPosition;
@@ -1938,7 +1935,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 	}
 	else
 	{
-		new Float:fGroundNormal[3];
+		float fGroundNormal[3];
 		GetClientFeetPosition(client, fUnsnappedTargetPosition, fGroundNormal);
 		SnapToGrid(client, fUnsnappedTargetPosition, fTargetPosition, fGroundNormal);
 		
@@ -1948,7 +1945,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 		// Put the start position a little bit higher and behind the player.
 		// That way you still see the beam, even if it's right below you.
 		fUnsnappedTargetPosition[2] += 32.0;
-		new Float:fViewDirection[3];
+		float fViewDirection[3];
 		GetClientEyeAngles(client, fViewDirection);
 		fViewDirection[0] = 0.0; // Ignore up/down view.
 		GetAngleVectors(fViewDirection, fViewDirection, NULL_VECTOR, NULL_VECTOR);
@@ -1969,12 +1966,12 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 		// When editing the center, we can display the rotation too :)
 		if (g_ClientMenuState[client][CMS_editCenter])
 		{
-			new group[ZoneGroup], zoneData[ZoneData];
+			int group[ZoneGroup], zoneData[ZoneData];
 			GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 			GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 			
 			// Only change the center of the box, keep all the other paramters the same.
-			new Float:fCenter[3], Float:fRotation[3], Float:fMins[3], Float:fMaxs[3];
+			float fCenter[3], fRotation[3], fMins[3], fMaxs[3];
 			fCenter = fTargetPosition;
 			Array_Copy(zoneData[ZD_rotation], fRotation, 3);
 			Array_Copy(zoneData[ZD_mins], fMins, 3);
@@ -1984,7 +1981,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 			return Plugin_Continue;
 		}
 		
-		new Float:fFirstPoint[3], Float:fSecondPoint[3];
+		float fFirstPoint[3], fSecondPoint[3];
 		// Copy the right other coordinate from the zone over.
 		if (g_ClientMenuState[client][CMS_editState] == ZES_first)
 		{
@@ -2008,7 +2005,7 @@ public Action:Timer_ShowZoneWhileAdding(Handle:timer, any:userid)
 	return Plugin_Continue;
 }
 
-ShowGridSnapBeamToClient(client, Float:fFirstPoint[3], Float:fSecondPoint[3])
+void ShowGridSnapBeamToClient(int client, float fFirstPoint[3], float fSecondPoint[3])
 {
 	TE_SetupBeamPoints(fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 1.0, 1.0, 2, 1.0, {0,255,0,255}, 0);
 	TE_SendToClient(client);
@@ -2017,7 +2014,7 @@ ShowGridSnapBeamToClient(client, Float:fFirstPoint[3], Float:fSecondPoint[3])
 /**
  * Menu stuff
  */
-DisplayGroupRootMenu(client, group[ZoneGroup])
+void DisplayGroupRootMenu(int client, int group[ZoneGroup])
 {
 	// Can't browse the zones (and possibly change the selected group in the client menu state)
 	// while adding a zone.
@@ -2038,24 +2035,24 @@ DisplayGroupRootMenu(client, group[ZoneGroup])
 	g_ClientMenuState[client][CMS_cluster] = -1;
 	g_ClientMenuState[client][CMS_zone] = -1;
 
-	new Handle:hMenu = CreateMenu(Menu_HandleGroupRoot);
-	SetMenuTitle(hMenu, "Manage zone group \"%s\"", group[ZG_name]);
-	SetMenuExitButton(hMenu, true);
+	Menu hMenu = new Menu(Menu_HandleGroupRoot);
+	hMenu.SetTitle("Manage zone group \"%s\"", group[ZG_name]);
+	hMenu.ExitButton = true;
 	if(group[ZG_menuCancelForward] != INVALID_HANDLE)
-		SetMenuExitBackButton(hMenu, true);
+		hMenu.ExitBackButton = true;
 	
-	new String:sBuffer[64];
-	AddMenuItem(hMenu, "add", "Add new zone");
-	AddMenuItem(hMenu, "paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
+	char sBuffer[64];
+	hMenu.AddItem("add", "Add new zone");
+	hMenu.AddItem("paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
 	Format(sBuffer, sizeof(sBuffer), "Show Zones to all: %T", (group[ZG_showZones]?"Yes":"No"), client);
-	AddMenuItem(hMenu, "showzonesall", sBuffer);
+	hMenu.AddItem("showzonesall", sBuffer);
 	Format(sBuffer, sizeof(sBuffer), "Show Zones to me only: %T\n \n", (group[ZG_adminShowZones][client]?"Yes":"No"), client);
-	AddMenuItem(hMenu, "showzonesme", sBuffer);
+	hMenu.AddItem("showzonesme", sBuffer);
 	
 	// Show zone count
-	new iNumZones, zoneData[ZoneData];
-	new iSize =GetArraySize(group[ZG_zones]);
-	for(new i=0;i<iSize;i++)
+	int iNumZones, zoneData[ZoneData];
+	int iSize = group[ZG_zones].Length;
+	for(int i=0;i<iSize;i++)
 	{
 		GetZoneByIndex(i, group, zoneData);
 		if(zoneData[ZD_deleted])
@@ -2065,12 +2062,12 @@ DisplayGroupRootMenu(client, group[ZoneGroup])
 		iNumZones++;
 	}
 	Format(sBuffer, sizeof(sBuffer), "List standalone zones (%d)", iNumZones);
-	AddMenuItem(hMenu, "zones", sBuffer);
+	hMenu.AddItem("zones", sBuffer);
 	
 	// Show cluster count
-	new iNumClusters, zoneCluster[ZoneCluster];
-	iSize = GetArraySize(group[ZG_cluster]);
-	for(new i=0;i<iSize;i++)
+	int iNumClusters, zoneCluster[ZoneCluster];
+	iSize = group[ZG_cluster].Length;
+	for(int i=0;i<iSize;i++)
 	{
 		GetZoneClusterByIndex(i, group, zoneCluster);
 		if(zoneCluster[ZC_deleted])
@@ -2078,27 +2075,27 @@ DisplayGroupRootMenu(client, group[ZoneGroup])
 		iNumClusters++;
 	}
 	Format(sBuffer, sizeof(sBuffer), "List zone clusters (%d)", iNumClusters);
-	AddMenuItem(hMenu, "clusters", sBuffer);
+	hMenu.AddItem("clusters", sBuffer);
 	
 	g_ClientMenuState[client][CMS_group] = group[ZG_index];
-	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+	hMenu.Display(client, MENU_TIME_FOREVER);
 	
 	// We might have interrupted one of our own menus which cancelled and unset our group state :(
 	g_ClientMenuState[client][CMS_group] = group[ZG_index];
 }
 
-public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
+public int Menu_HandleGroupRoot(Menu menu, MenuAction action, int param1, int param2)
 {
 	if(action == MenuAction_End)
 	{
-		CloseHandle(menu);
+		delete menu;
 	}
 	else if(action == MenuAction_Select)
 	{
-		new String:sInfo[32];
-		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		char sInfo[32];
+		menu.GetItem(param2, sInfo, sizeof(sInfo));
 		
-		new group[ZoneGroup];
+		int group[ZoneGroup];
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 		
 		// Handle toggling of zone visibility first
@@ -2106,7 +2103,7 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 		{
 			// warning 226: a variable is assigned to itself (symbol "group")
 			//group[ZG_showZones] = !group[ZG_showZones];
-			new bool:swap = group[ZG_showZones];
+			bool swap = group[ZG_showZones];
 			group[ZG_showZones] = !swap;
 			SaveGroup(group);
 			
@@ -2122,14 +2119,14 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 			//group[ZG_showZones] = !group[ZG_showZones];
 			// We save the toggle state for this menu in the group.
 			// The actual showing/hiding of zones is done in the below loop.
-			new bool:swap = !group[ZG_adminShowZones][param1];
+			bool swap = !group[ZG_adminShowZones][param1];
 			group[ZG_adminShowZones][param1] = swap;
 			SaveGroup(group);
 			
 			// Set the zones in this group to show for this admin or not.
-			new iNumZones = GetArraySize(group[ZG_zones]);
-			new zoneData[ZoneData];
-			for(new i=0;i<iNumZones;i++)
+			int iNumZones = group[ZG_zones].Length;
+			int zoneData[ZoneData];
+			for(int i=0;i<iNumZones;i++)
 			{
 				GetZoneByIndex(i, group, zoneData);
 				zoneData[ZD_adminShowZone][param1] = swap;
@@ -2137,9 +2134,9 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 			}
 			
 			// Remember this setting for contained clusters too.
-			new iNumClusters = GetArraySize(group[ZG_cluster]);
-			new zoneCluster[ZoneCluster];
-			for(new i=0;i<iNumClusters;i++)
+			int iNumClusters = group[ZG_cluster].Length;
+			int zoneCluster[ZoneCluster];
+			for(int i=0;i<iNumClusters;i++)
 			{
 				GetZoneClusterByIndex(i, group, zoneCluster);
 				zoneCluster[ZC_adminShowZones][param1] = swap;
@@ -2174,7 +2171,7 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 	}
 	else if(action == MenuAction_Cancel)
 	{
-		new group[ZoneGroup];
+		int group[ZoneGroup];
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 		// This group has a menu back action handler registered? Call it!
 		if(group[ZG_menuCancelForward] != INVALID_HANDLE)
@@ -2189,32 +2186,32 @@ public Menu_HandleGroupRoot(Handle:menu, MenuAction:action, param1, param2)
 	}
 }
 
-DisplayZoneListMenu(client)
+void DisplayZoneListMenu(int client)
 {
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 		
-	new Handle:hMenu = CreateMenu(Menu_HandleZoneList);
+	Menu hMenu = new Menu(Menu_HandleZoneList);
 	if(g_ClientMenuState[client][CMS_cluster] == -1)
 	{
-		SetMenuTitle(hMenu, "Manage zones for \"%s\"", group[ZG_name]);
+		hMenu.SetTitle("Manage zones for \"%s\"", group[ZG_name]);
 	}
 	else
 	{
 		// Reuse this menu to add zones to a cluster form the cluster edit menu directly.
 		// It looks the same, is just handled differently.
-		new zoneCluster[ZoneCluster];
+		int zoneCluster[ZoneCluster];
 		GetZoneClusterByIndex(g_ClientMenuState[client][CMS_cluster], group, zoneCluster);
-		SetMenuTitle(hMenu, "Add zones to cluster \"%s\"", zoneCluster[ZC_name]);
+		hMenu.SetTitle("Add zones to cluster \"%s\"", zoneCluster[ZC_name]);
 	}
-	SetMenuExitBackButton(hMenu, true);
+	hMenu.ExitBackButton = true;
 
-	AddMenuItem(hMenu, "add", "Add new zone\n \n");
+	hMenu.AddItem("add", "Add new zone\n \n");
 
-	new String:sBuffer[64];
-	new iNumZones = GetArraySize(group[ZG_zones]);
-	new zoneData[ZoneData], iZoneCount;
-	for(new i=0;i<iNumZones;i++)
+	char sBuffer[64];
+	int iNumZones = group[ZG_zones].Length;
+	int zoneData[ZoneData], iZoneCount;
+	for(int i=0;i<iNumZones;i++)
 	{
 		GetZoneByIndex(i, group, zoneData);
 		// Ignore zones marked as deleted.
@@ -2226,28 +2223,28 @@ DisplayZoneListMenu(client)
 			continue;
 		
 		IntToString(i, sBuffer, sizeof(sBuffer));
-		AddMenuItem(hMenu, sBuffer, zoneData[ZD_name]);
+		hMenu.AddItem(sBuffer, zoneData[ZD_name]);
 		iZoneCount++;
 	}
 	
 	if(!iZoneCount)
 	{
-		AddMenuItem(hMenu, "", "No zones in this group.", ITEMDRAW_DISABLED);
+		hMenu.AddItem("", "No zones in this group.", ITEMDRAW_DISABLED);
 	}
 	
-	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+	hMenu.Display(client, MENU_TIME_FOREVER);
 }
 
-public Menu_HandleZoneList(Handle:menu, MenuAction:action, param1, param2)
+public int Menu_HandleZoneList(Menu menu, MenuAction action, int param1, int param2)
 {
 	if(action == MenuAction_End)
 	{
-		CloseHandle(menu);
+		delete menu;
 	}
 	else if(action == MenuAction_Select)
 	{
-		new String:sInfo[32];
-		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		char sInfo[32];
+		menu.GetItem(param2, sInfo, sizeof(sInfo));
 
 		if(StrEqual(sInfo, "add"))
 		{
@@ -2255,7 +2252,7 @@ public Menu_HandleZoneList(Handle:menu, MenuAction:action, param1, param2)
 			return;
 		}
 		
-		new iZoneIndex = StringToInt(sInfo);
+		int iZoneIndex = StringToInt(sInfo);
 
 		// Normal zone list accessed from the main menu.
 		if(g_ClientMenuState[param1][CMS_cluster] == -1)
@@ -2267,7 +2264,7 @@ public Menu_HandleZoneList(Handle:menu, MenuAction:action, param1, param2)
 		// Add this zone to the cluster.
 		else
 		{
-			new group[ZoneGroup], zoneCluster[ZoneCluster], zoneData[ZoneData];
+			int group[ZoneGroup], zoneCluster[ZoneCluster], zoneData[ZoneData];
 			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 			GetZoneClusterByIndex(g_ClientMenuState[param1][CMS_cluster], group, zoneCluster);
 			GetZoneByIndex(iZoneIndex, group, zoneData);
@@ -2284,7 +2281,7 @@ public Menu_HandleZoneList(Handle:menu, MenuAction:action, param1, param2)
 			// Check if the zone was in a cluster before
 			if (zoneData[ZD_clusterIndex] != -1)
 			{
-				new oldZoneCluster[ZoneCluster];
+				int oldZoneCluster[ZoneCluster];
 				GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, oldZoneCluster);
 				if (!oldZoneCluster[ZC_deleted])
 				{
@@ -2314,7 +2311,7 @@ public Menu_HandleZoneList(Handle:menu, MenuAction:action, param1, param2)
 			// Show the root menu again.
 			if(g_ClientMenuState[param1][CMS_cluster] == -1)
 			{
-				new group[ZoneGroup];
+				int group[ZoneGroup];
 				GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 				DisplayGroupRootMenu(param1, group);
 			}
@@ -2332,21 +2329,21 @@ public Menu_HandleZoneList(Handle:menu, MenuAction:action, param1, param2)
 	}
 }
 
-DisplayClusterListMenu(client)
+void DisplayClusterListMenu(int client)
 {
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	
-	new Handle:hMenu = CreateMenu(Menu_HandleClusterList);
-	SetMenuTitle(hMenu, "Manage clusters for \"%s\"\nZones in a cluster will act like one big zone.\nAllows for different shapes than just rectangles.", group[ZG_name]);
-	SetMenuExitBackButton(hMenu, true);
+	Menu hMenu = new Menu(Menu_HandleClusterList);
+	hMenu.SetTitle("Manage clusters for \"%s\"\nZones in a cluster will act like one big zone.\nAllows for different shapes than just rectangles.", group[ZG_name]);
+	hMenu.ExitBackButton = true;
 
-	AddMenuItem(hMenu, "add", "Add cluster\n \n");
+	hMenu.AddItem("add", "Add cluster\n \n");
 	
-	new String:sBuffer[64];
-	new iNumClusters = GetArraySize(group[ZG_cluster]);
-	new zoneCluster[ZoneCluster], iClusterCount;
-	for(new i=0;i<iNumClusters;i++)
+	char sBuffer[64];
+	int iNumClusters = group[ZG_cluster].Length;
+	int zoneCluster[ZoneCluster], iClusterCount;
+	for(int i=0;i<iNumClusters;i++)
 	{
 		GetZoneClusterByIndex(i, group, zoneCluster);
 		// Ignore clusters marked as deleted.
@@ -2354,30 +2351,30 @@ DisplayClusterListMenu(client)
 			continue;
 		
 		IntToString(i, sBuffer, sizeof(sBuffer));
-		AddMenuItem(hMenu, sBuffer, zoneCluster[ZC_name]);
+		hMenu.AddItem(sBuffer, zoneCluster[ZC_name]);
 		iClusterCount++;
 	}
 	
 	if(!iClusterCount)
 	{
-		AddMenuItem(hMenu, "", "No clusters in this group.", ITEMDRAW_DISABLED);
+		hMenu.AddItem("", "No clusters in this group.", ITEMDRAW_DISABLED);
 	}
 	
-	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+	hMenu.Display(client, MENU_TIME_FOREVER);
 }
 
-public Menu_HandleClusterList(Handle:menu, MenuAction:action, param1, param2)
+public int Menu_HandleClusterList(Menu menu, MenuAction action, int param1, int param2)
 {
 	if(action == MenuAction_End)
 	{
-		CloseHandle(menu);
+		delete menu;
 	}
 	else if(action == MenuAction_Select)
 	{
-		new String:sInfo[32];
-		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		char sInfo[32];
+		menu.GetItem(param2, sInfo, sizeof(sInfo));
 		
-		new group[ZoneGroup];
+		int group[ZoneGroup];
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 		
 		if(StrEqual(sInfo, "add"))
@@ -2387,7 +2384,7 @@ public Menu_HandleClusterList(Handle:menu, MenuAction:action, param1, param2)
 			return;
 		}
 		
-		new iClusterIndex = StringToInt(sInfo);
+		int iClusterIndex = StringToInt(sInfo);
 		g_ClientMenuState[param1][CMS_cluster] = iClusterIndex;
 		DisplayClusterEditMenu(param1);
 	}
@@ -2395,7 +2392,7 @@ public Menu_HandleClusterList(Handle:menu, MenuAction:action, param1, param2)
 	{
 		if(param2 == MenuCancel_ExitBack)
 		{
-			new group[ZoneGroup];
+			int group[ZoneGroup];
 			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 			DisplayGroupRootMenu(param1, group);
 		}
@@ -2406,9 +2403,9 @@ public Menu_HandleClusterList(Handle:menu, MenuAction:action, param1, param2)
 	}
 }
 
-DisplayClusterEditMenu(client)
+void DisplayClusterEditMenu(int client)
 {
-	new group[ZoneGroup], zoneCluster[ZoneCluster];
+	int group[ZoneGroup], zoneCluster[ZoneCluster];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	GetZoneClusterByIndex(g_ClientMenuState[client][CMS_cluster], group, zoneCluster);
 
@@ -2426,28 +2423,28 @@ DisplayClusterEditMenu(client)
 		return;
 	}
 	
-	new Handle:hMenu = CreateMenu(Menu_HandleClusterEdit);
-	SetMenuExitBackButton(hMenu, true);
-	SetMenuTitle(hMenu, "Manage cluster \"%s\" of group \"%s\"", zoneCluster[ZC_name], group[ZG_name]);
+	Menu hMenu = new Menu(Menu_HandleClusterEdit);
+	hMenu.ExitBackButton = true;
+	hMenu.SetTitle("Manage cluster \"%s\" of group \"%s\"", zoneCluster[ZC_name], group[ZG_name]);
 	
-	new String:sBuffer[64];
+	char sBuffer[64];
 	Format(sBuffer, sizeof(sBuffer), "Show zones in this cluster to me: %T", (zoneCluster[ZC_adminShowZones][client]?"Yes":"No"), client);
-	AddMenuItem(hMenu, "show", sBuffer);
-	AddMenuItem(hMenu, "add", "Add zone to cluster");
+	hMenu.AddItem("show", sBuffer);
+	hMenu.AddItem("add", "Add zone to cluster");
 	
-	new String:sTeam[32] = "Any";
+	char sTeam[32] = "Any";
 	if(zoneCluster[ZC_teamFilter] > 1)
 		GetTeamName(zoneCluster[ZC_teamFilter], sTeam, sizeof(sTeam));
 	Format(sBuffer, sizeof(sBuffer), "Team filter: %s", sTeam);
-	AddMenuItem(hMenu, "team", sBuffer);
-	AddMenuItem(hMenu, "paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
-	AddMenuItem(hMenu, "rename", "Rename");
-	AddMenuItem(hMenu, "delete", "Delete");
+	hMenu.AddItem("team", sBuffer);
+	hMenu.AddItem("paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
+	hMenu.AddItem("rename", "Rename");
+	hMenu.AddItem("delete", "Delete");
 	
-	AddMenuItem(hMenu, "", "Zones:", ITEMDRAW_DISABLED);
-	new iNumZones = GetArraySize(group[ZG_zones]);
-	new zoneData[ZoneData], iZoneCount;
-	for(new i=0;i<iNumZones;i++)
+	hMenu.AddItem("", "Zones:", ITEMDRAW_DISABLED);
+	int iNumZones = group[ZG_zones].Length;
+	int zoneData[ZoneData], iZoneCount;
+	for(int i=0;i<iNumZones;i++)
 	{
 		GetZoneByIndex(i, group, zoneData);
 		// Ignore zones marked as deleted.
@@ -2459,30 +2456,30 @@ DisplayClusterEditMenu(client)
 			continue;
 		
 		IntToString(i, sBuffer, sizeof(sBuffer));
-		AddMenuItem(hMenu, sBuffer, zoneData[ZD_name]);
+		hMenu.AddItem(sBuffer, zoneData[ZD_name]);
 		iZoneCount++;
 	}
 	
 	if(!iZoneCount)
 	{
-		AddMenuItem(hMenu, "", "No zones in this cluster.", ITEMDRAW_DISABLED);
+		hMenu.AddItem("", "No zones in this cluster.", ITEMDRAW_DISABLED);
 	}
 	
-	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+	hMenu.Display(client, MENU_TIME_FOREVER);
 }
 
-public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
+public int Menu_HandleClusterEdit(Menu menu, MenuAction action, int param1, int param2)
 {
 	if(action == MenuAction_End)
 	{
-		CloseHandle(menu);
+		delete menu;
 	}
 	else if(action == MenuAction_Select)
 	{
-		new String:sInfo[32];
-		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		char sInfo[32];
+		menu.GetItem(param2, sInfo, sizeof(sInfo));
 		
-		new group[ZoneGroup], zoneCluster[ZoneCluster];
+		int group[ZoneGroup], zoneCluster[ZoneCluster];
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 		GetZoneClusterByIndex(g_ClientMenuState[param1][CMS_cluster], group, zoneCluster);
 		
@@ -2494,14 +2491,14 @@ public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
 		// Show all zones in this cluster to one admin
 		else if(StrEqual(sInfo, "show"))
 		{
-			new bool:swap = !zoneCluster[ZC_adminShowZones][param1];
+			bool swap = !zoneCluster[ZC_adminShowZones][param1];
 			zoneCluster[ZC_adminShowZones][param1] = swap;
 			SaveCluster(group, zoneCluster);
 			
 			// Set all zones of this cluster to the same state.
-			new iNumZones = GetArraySize(group[ZG_zones]);
-			new zoneData[ZoneData];
-			for(new i=0;i<iNumZones;i++)
+			int iNumZones = group[ZG_zones].Length;
+			int zoneData[ZoneData];
+			for(int i=0;i<iNumZones;i++)
 			{
 				GetZoneByIndex(i, group, zoneData);
 				if(zoneData[ZD_deleted])
@@ -2524,7 +2521,7 @@ public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
 		else if(StrEqual(sInfo, "team"))
 		{
 			// Loop through all teams
-			new iTeam = zoneCluster[ZC_teamFilter];
+			int iTeam = zoneCluster[ZC_teamFilter];
 			iTeam++;
 			// Start from the beginning
 			if(iTeam > 3)
@@ -2536,9 +2533,9 @@ public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
 			SaveCluster(group, zoneCluster);
 			
 			// Set all zones of this cluster to the same state.
-			new iNumZones = GetArraySize(group[ZG_zones]);
-			new zoneData[ZoneData];
-			for(new i=0;i<iNumZones;i++)
+			int iNumZones = group[ZG_zones].Length;
+			int zoneData[ZoneData];
+			for(int i=0;i<iNumZones;i++)
 			{
 				GetZoneByIndex(i, group, zoneData);
 				if(zoneData[ZD_deleted])
@@ -2571,21 +2568,21 @@ public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
 		// Delete the cluster
 		else if(StrEqual(sInfo, "delete"))
 		{
-			decl String:sBuffer[128];
-			new Handle:hPanel = CreatePanel();
+			char sBuffer[128];
+			Panel hPanel = new Panel();
 			Format(sBuffer, sizeof(sBuffer), "Do you really want to delete cluster \"%s\"?", zoneCluster[ZC_name]);
-			SetPanelTitle(hPanel, sBuffer);
+			hPanel.SetTitle(sBuffer);
 			
-			DrawPanelItem(hPanel, "Yes, delete cluster and all contained zones");
-			DrawPanelItem(hPanel, "Yes, delete cluster, but keep all contained zones");
-			DrawPanelItem(hPanel, "No, DON'T delete anything");
+			hPanel.DrawItem("Yes, delete cluster and all contained zones");
+			hPanel.DrawItem("Yes, delete cluster, but keep all contained zones");
+			hPanel.DrawItem("No, DON'T delete anything");
 			
-			SendPanelToClient(hPanel, param1, Panel_HandleConfirmDeleteCluster, MENU_TIME_FOREVER);
-			CloseHandle(hPanel);
+			hPanel.Send(param1, Panel_HandleConfirmDeleteCluster, MENU_TIME_FOREVER);
+			delete hPanel;
 		}
 		else
 		{
-			new iZoneIndex = StringToInt(sInfo);
+			int iZoneIndex = StringToInt(sInfo);
 			g_ClientMenuState[param1][CMS_zone] = iZoneIndex;
 			DisplayZoneEditMenu(param1);
 		}
@@ -2612,7 +2609,7 @@ public Menu_HandleClusterEdit(Handle:menu, MenuAction:action, param1, param2)
 	}
 }
 
-public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, param2)
+public int Panel_HandleConfirmDeleteCluster(Menu menu, MenuAction action, int param1, int param2)
 {
 	if(action == MenuAction_Select)
 	{
@@ -2623,18 +2620,18 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 			return;
 		}
 		
-		new group[ZoneGroup], zoneCluster[ZoneCluster];
+		int group[ZoneGroup], zoneCluster[ZoneCluster];
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 		GetZoneClusterByIndex(g_ClientMenuState[param1][CMS_cluster], group, zoneCluster);
 		
-		new bool:bDeleteZones = param2 == 1;
+		bool bDeleteZones = param2 == 1;
 		
 		// Delete all contained zones in the cluster too.
 		// Make sure the trigger is removed.
-		new iNumZones = GetArraySize(group[ZG_zones]);
-		new zoneData[ZoneData];
-		new iZonesCount;
-		for(new i=0;i<iNumZones;i++)
+		int iNumZones = group[ZG_zones].Length;
+		int zoneData[ZoneData];
+		int iZonesCount;
+		for(int i=0;i<iNumZones;i++)
 		{
 			GetZoneByIndex(i, group, zoneData);
 			if(zoneData[ZD_deleted])
@@ -2696,9 +2693,9 @@ public Panel_HandleConfirmDeleteCluster(Handle:menu, MenuAction:action, param1, 
 	}
 }
 
-DisplayZoneEditMenu(client)
+void DisplayZoneEditMenu(int client)
 {
-	new group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
+	int group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 
@@ -2715,59 +2712,59 @@ DisplayZoneEditMenu(client)
 		return;
 	}
 	
-	new Handle:hMenu = CreateMenu(Menu_HandleZoneEdit);
-	SetMenuExitBackButton(hMenu, true);
+	Menu hMenu = new Menu(Menu_HandleZoneEdit);
+	hMenu.ExitBackButton = true;
 	if(zoneData[ZD_clusterIndex] == -1)
-		SetMenuTitle(hMenu, "Manage zone \"%s\" in group \"%s\"", zoneData[ZD_name], group[ZG_name]);
+		hMenu.SetTitle("Manage zone \"%s\" in group \"%s\"", zoneData[ZD_name], group[ZG_name]);
 	else
 	{
 		GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
-		SetMenuTitle(hMenu, "Manage zone \"%s\" in cluster \"%s\" of group \"%s\"", zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
+		hMenu.SetTitle("Manage zone \"%s\" in cluster \"%s\" of group \"%s\"", zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
 	}
 	
-	new String:sBuffer[128];
-	AddMenuItem(hMenu, "teleport", "Teleport to");
+	char sBuffer[128];
+	hMenu.AddItem("teleport", "Teleport to");
 	Format(sBuffer, sizeof(sBuffer), "Show zone to me: %T", (zoneData[ZD_adminShowZone][client]?"Yes":"No"), client);
-	AddMenuItem(hMenu, "show", sBuffer);
-	AddMenuItem(hMenu, "edit", "Edit zone");
+	hMenu.AddItem("show", sBuffer);
+	hMenu.AddItem("edit", "Edit zone");
 	
-	new String:sTeam[32] = "Any";
+	char sTeam[32] = "Any";
 	if(zoneData[ZD_teamFilter] > 1)
 		GetTeamName(zoneData[ZD_teamFilter], sTeam, sizeof(sTeam));
 	Format(sBuffer, sizeof(sBuffer), "Team filter: %s", sTeam);
-	AddMenuItem(hMenu, "team", sBuffer);
+	hMenu.AddItem("team", sBuffer);
 	
 	if(zoneData[ZD_clusterIndex] == -1)
 		Format(sBuffer, sizeof(sBuffer), "Add to a cluster");
 	else
 		Format(sBuffer, sizeof(sBuffer), "Remove from cluster \"%s\"", zoneCluster[ZC_name]);
-	AddMenuItem(hMenu, "cluster", sBuffer);
-	AddMenuItem(hMenu, "copy", "Copy to clipboard");
-	AddMenuItem(hMenu, "rename", "Rename");
-	AddMenuItem(hMenu, "delete", "Delete");
+	hMenu.AddItem("cluster", sBuffer);
+	hMenu.AddItem("copy", "Copy to clipboard");
+	hMenu.AddItem("rename", "Rename");
+	hMenu.AddItem("delete", "Delete");
 	
-	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+	hMenu.Display(client, MENU_TIME_FOREVER);
 }
 
-public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
+public int Menu_HandleZoneEdit(Menu menu, MenuAction action, int param1, int param2)
 {
 	if(action == MenuAction_End)
 	{
-		CloseHandle(menu);
+		delete menu;
 	}
 	else if(action == MenuAction_Select)
 	{
-		new String:sInfo[32];
-		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		char sInfo[32];
+		menu.GetItem(param2, sInfo, sizeof(sInfo));
 		
-		new group[ZoneGroup], zoneData[ZoneData];
+		int group[ZoneGroup], zoneData[ZoneData];
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 		GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
 		
 		// Teleport to the zone
 		if(StrEqual(sInfo, "teleport"))
 		{
-			new Float:vBuf[3];
+			float vBuf[3];
 			Array_Copy(zoneData[ZD_position], vBuf, 3);
 			TeleportEntity(param1, vBuf, NULL_VECTOR, NULL_VECTOR);
 			DisplayZoneEditMenu(param1);
@@ -2775,7 +2772,7 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 		// Show zone to admin
 		else if(StrEqual(sInfo, "show"))
 		{
-			new bool:swap = !zoneData[ZD_adminShowZone][param1];
+			bool swap = !zoneData[ZD_adminShowZone][param1];
 			zoneData[ZD_adminShowZone][param1] = swap;
 			SaveZone(group, zoneData);
 			
@@ -2792,7 +2789,7 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 		else if(StrEqual(sInfo, "team"))
 		{
 			// Loop through all teams
-			new iTeam = zoneData[ZD_teamFilter];
+			int iTeam = zoneData[ZD_teamFilter];
 			iTeam++;
 			// Start from the beginning
 			if(iTeam > 3)
@@ -2817,21 +2814,21 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 			// Zone is part of a cluster
 			else
 			{
-				new zoneCluster[ZoneCluster];
+				int zoneCluster[ZoneCluster];
 				GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
 			
-				decl String:sBuffer[128];
-				new Handle:hPanel = CreatePanel();
+				char sBuffer[128];
+				Panel hPanel = new Panel();
 				Format(sBuffer, sizeof(sBuffer), "Do you really want to remove zone \"%s\" from cluster \"%s\"?", zoneData[ZD_name], zoneCluster[ZC_name]);
-				SetPanelTitle(hPanel, sBuffer);
+				hPanel.SetTitle(sBuffer);
 				
 				Format(sBuffer, sizeof(sBuffer), "%T", "Yes", param1);
-				DrawPanelItem(hPanel, sBuffer);
+				hPanel.DrawItem(sBuffer);
 				Format(sBuffer, sizeof(sBuffer), "%T", "No", param1);
-				DrawPanelItem(hPanel, sBuffer);
+				hPanel.DrawItem(sBuffer);
 				
-				SendPanelToClient(hPanel, param1, Panel_HandleConfirmRemoveFromCluster, MENU_TIME_FOREVER);
-				CloseHandle(hPanel);
+				hPanel.Send(param1, Panel_HandleConfirmRemoveFromCluster, MENU_TIME_FOREVER);
+				delete hPanel;
 			}
 		}
 		// Edit details like position and rotation
@@ -2850,18 +2847,18 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 		// delete the zone
 		else if(StrEqual(sInfo, "delete"))
 		{
-			decl String:sBuffer[128];
-			new Handle:hPanel = CreatePanel();
+			char sBuffer[128];
+			Panel hPanel = new Panel();
 			Format(sBuffer, sizeof(sBuffer), "Do you really want to delete zone \"%s\"?", zoneData[ZD_name]);
-			SetPanelTitle(hPanel, sBuffer);
+			hPanel.SetTitle(sBuffer);
 			
 			Format(sBuffer, sizeof(sBuffer), "%T", "Yes", param1);
-			DrawPanelItem(hPanel, sBuffer);
+			hPanel.DrawItem(sBuffer);
 			Format(sBuffer, sizeof(sBuffer), "%T", "No", param1);
-			DrawPanelItem(hPanel, sBuffer);
+			hPanel.DrawItem(sBuffer);
 			
-			SendPanelToClient(hPanel, param1, Panel_HandleConfirmDeleteZone, MENU_TIME_FOREVER);
-			CloseHandle(hPanel);
+			hPanel.Send(param1, Panel_HandleConfirmDeleteZone, MENU_TIME_FOREVER);
+			delete hPanel;
 		}
 	}
 	else if(action == MenuAction_Cancel)
@@ -2896,9 +2893,9 @@ public Menu_HandleZoneEdit(Handle:menu, MenuAction:action, param1, param2)
 	}
 }
 
-DisplayZoneEditDetailsMenu(client)
+void DisplayZoneEditDetailsMenu(int client)
 {
-	new group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
+	int group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 
@@ -2916,36 +2913,36 @@ DisplayZoneEditDetailsMenu(client)
 		return;
 	}
 	
-	new Handle:hMenu = CreateMenu(Menu_HandleZoneEditDetails);
-	SetMenuExitBackButton(hMenu, true);
+	Menu hMenu = new Menu(Menu_HandleZoneEditDetails);
+	hMenu.ExitBackButton = true;
 	if(g_ClientMenuState[client][CMS_cluster] == -1)
-		SetMenuTitle(hMenu, "Edit zone \"%s\" in group \"%s\"", zoneData[ZD_name], group[ZG_name]);
+		hMenu.SetTitle("Edit zone \"%s\" in group \"%s\"", zoneData[ZD_name], group[ZG_name]);
 	else
 	{
 		GetZoneClusterByIndex(g_ClientMenuState[client][CMS_cluster], group, zoneCluster);
-		SetMenuTitle(hMenu, "Edit zone \"%s\" in cluster \"%s\" of group \"%s\"", zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
+		hMenu.SetTitle("Edit zone \"%s\" in cluster \"%s\" of group \"%s\"", zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
 	}
 	
-	AddMenuItem(hMenu, "position1", "Change first corner");
-	AddMenuItem(hMenu, "position2", "Change second corner");
-	AddMenuItem(hMenu, "center", "Move center of zone");
-	AddMenuItem(hMenu, "rotation", "Change rotation");
+	hMenu.AddItem("position1", "Change first corner");
+	hMenu.AddItem("position2", "Change second corner");
+	hMenu.AddItem("center", "Move center of zone");
+	hMenu.AddItem("rotation", "Change rotation");
 	
-	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+	hMenu.Display(client, MENU_TIME_FOREVER);
 }
 
-public Menu_HandleZoneEditDetails(Handle:menu, MenuAction:action, param1, param2)
+public int Menu_HandleZoneEditDetails(Menu menu, MenuAction action, int param1, int param2)
 {
 	if(action == MenuAction_End)
 	{
-		CloseHandle(menu);
+		delete menu;
 	}
 	else if(action == MenuAction_Select)
 	{
-		new String:sInfo[32];
-		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		char sInfo[32];
+		menu.GetItem(param2, sInfo, sizeof(sInfo));
 		
-		new group[ZoneGroup], zoneData[ZoneData];
+		int group[ZoneGroup], zoneData[ZoneData];
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 		GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
 		
@@ -2956,7 +2953,7 @@ public Menu_HandleZoneEditDetails(Handle:menu, MenuAction:action, param1, param2
 			g_ClientMenuState[param1][CMS_editPosition] = true;
 			
 			// Get the current zone bounds as base to edit from.
-			for(new i=0;i<3;i++)
+			for(int i=0;i<3;i++)
 			{
 				g_ClientMenuState[param1][CMS_first][i] = zoneData[ZD_position][i] + zoneData[ZD_mins][i];
 				g_ClientMenuState[param1][CMS_second][i] = zoneData[ZD_position][i] + zoneData[ZD_maxs][i];
@@ -3003,21 +3000,22 @@ public Menu_HandleZoneEditDetails(Handle:menu, MenuAction:action, param1, param2
 	}
 }
 
-DisplayClusterSelectionMenu(client)
+void DisplayClusterSelectionMenu(int client)
 {
-	new group[ZoneGroup], zoneData[ZoneData];
+	int group[ZoneGroup], zoneData[ZoneData];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 	
-	new Handle:hMenu = CreateMenu(Menu_HandleClusterSelection);
-	SetMenuTitle(hMenu, "Add zone \"%s\" to cluster:", zoneData[ZD_name]);
-	SetMenuExitBackButton(hMenu, true);
+	Menu hMenu = new Menu(Menu_HandleClusterSelection);
+	hMenu.SetTitle("Add zone \"%s\" to cluster:", zoneData[ZD_name]);
+	hMenu.ExitBackButton = true;
 
-	AddMenuItem(hMenu, "newcluster", "Add new cluster\n \n");
+	hMenu.AddItem("newcluster", "Add new cluster\n \n");
 	
-	new iNumClusters = GetArraySize(group[ZG_cluster]);
-	new zoneCluster[ZoneCluster], String:sIndex[16], iClusterCount;
-	for(new i=0;i<iNumClusters;i++)
+	int iNumClusters = group[ZG_cluster].Length;
+	int zoneCluster[ZoneCluster], iClusterCount;
+	char sIndex[16];
+	for(int i=0;i<iNumClusters;i++)
 	{
 		GetZoneClusterByIndex(i, group, zoneCluster);
 		
@@ -3025,26 +3023,26 @@ DisplayClusterSelectionMenu(client)
 			continue;
 		
 		IntToString(i, sIndex, sizeof(sIndex));
-		AddMenuItem(hMenu, sIndex, zoneCluster[ZC_name]);
+		hMenu.AddItem(sIndex, zoneCluster[ZC_name]);
 		iClusterCount++;
 	}
 	
 	if(!iClusterCount)
-		AddMenuItem(hMenu, "", "No clusters available.", ITEMDRAW_DISABLED);
+		hMenu.AddItem("", "No clusters available.", ITEMDRAW_DISABLED);
 	
-	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+	hMenu.Display(client, MENU_TIME_FOREVER);
 }
 
-public Menu_HandleClusterSelection(Handle:menu, MenuAction:action, param1, param2)
+public int Menu_HandleClusterSelection(Menu menu, MenuAction action, int param1, int param2)
 {
 	if(action == MenuAction_End)
 	{
-		CloseHandle(menu);
+		delete menu;
 	}
 	else if(action == MenuAction_Select)
 	{
-		new String:sInfo[32];
-		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		char sInfo[32];
+		menu.GetItem(param2, sInfo, sizeof(sInfo));
 		
 		if (StrEqual(sInfo, "newcluster"))
 		{
@@ -3053,11 +3051,11 @@ public Menu_HandleClusterSelection(Handle:menu, MenuAction:action, param1, param
 			return;
 		}
 		
-		new group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
+		int group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 		GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
 		
-		new iClusterIndex = StringToInt(sInfo);
+		int iClusterIndex = StringToInt(sInfo);
 		GetZoneClusterByIndex(iClusterIndex, group, zoneCluster);
 		// That cluster isn't available anymore..
 		if(zoneCluster[ZC_deleted])
@@ -3091,14 +3089,14 @@ public Menu_HandleClusterSelection(Handle:menu, MenuAction:action, param1, param
 	}
 }
 
-public Panel_HandleConfirmRemoveFromCluster(Handle:menu, MenuAction:action, param1, param2)
+public int Panel_HandleConfirmRemoveFromCluster(Menu menu, MenuAction action, int param1, int param2)
 {
 	if(action == MenuAction_Select)
 	{
 		// Selected "Yes" -> remove zone from cluster.
 		if(param2 == 1)
 		{
-			new group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
+			int group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
 			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 			GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
 			if(zoneData[ZD_clusterIndex] != -1)
@@ -3124,14 +3122,14 @@ public Panel_HandleConfirmRemoveFromCluster(Handle:menu, MenuAction:action, para
 	}
 }
 
-public Panel_HandleConfirmDeleteZone(Handle:menu, MenuAction:action, param1, param2)
+public int Panel_HandleConfirmDeleteZone(Menu menu, MenuAction action, int param1, int param2)
 {
 	if(action == MenuAction_Select)
 	{
 		// Selected "Yes" -> delete the zone.
 		if(param2 == 1)
 		{
-			new group[ZoneGroup], zoneData[ZoneData];
+			int group[ZoneGroup], zoneData[ZoneData];
 			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 			GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
 			
@@ -3159,7 +3157,7 @@ public Panel_HandleConfirmDeleteZone(Handle:menu, MenuAction:action, param1, par
 			}
 			else
 			{
-				new zoneCluster[ZoneCluster];
+				int zoneCluster[ZoneCluster];
 				if(zoneData[ZD_clusterIndex] != -1)
 					GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
 				LogAction(param1, -1, "%L deleted zone \"%s\" from cluster \"%s\" of group \"%s\".", param1, zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
@@ -3181,39 +3179,39 @@ public Panel_HandleConfirmDeleteZone(Handle:menu, MenuAction:action, param1, par
 }
 
 // Edit one of the points or the center of the zone.
-DisplayZonePointEditMenu(client)
+void DisplayZonePointEditMenu(int client)
 {
 	// Start the display timer, if this is the first time we open this menu.
 	if (!g_hShowZoneWhileEditTimer[client])
 		g_hShowZoneWhileEditTimer[client] = CreateTimer(0.1, Timer_ShowZoneWhileAdding, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE|TIMER_REPEAT);
 
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	
-	new Handle:hMenu = CreateMenu(Menu_HandleZonePointEdit);
+	Menu hMenu = new Menu(Menu_HandleZonePointEdit);
 	if(g_ClientMenuState[client][CMS_addZone])
 	{
-		SetMenuTitle(hMenu, "Add new zone > Position %d\nClick on the point or push \"e\" to set it at your feet.", _:g_ClientMenuState[client][CMS_editState]+1);
+		hMenu.SetTitle("Add new zone > Position %d\nClick on the point or push \"e\" to set it at your feet.", view_as<int>(g_ClientMenuState[client][CMS_editState])+1);
 	}
 	else
 	{
-		new zoneData[ZoneData];
+		int zoneData[ZoneData];
 		GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 		if(g_ClientMenuState[client][CMS_editCenter])
 		{
-			SetMenuTitle(hMenu, "Edit zone \"%s\" center\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name]);
+			hMenu.SetTitle("Edit zone \"%s\" center\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name]);
 		}
 		else
 		{
-			SetMenuTitle(hMenu, "Edit zone \"%s\" position %d\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name], _:g_ClientMenuState[client][CMS_editState]+1);
+			hMenu.SetTitle("Edit zone \"%s\" position %d\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name], view_as<int>(g_ClientMenuState[client][CMS_editState])+1);
 		}
 	}
-	SetMenuExitBackButton(hMenu, true);
+	hMenu.ExitBackButton = true;
 
 	if(!g_ClientMenuState[client][CMS_addZone])
-		AddMenuItem(hMenu, "save", "Save changes");
+		hMenu.AddItem("save", "Save changes");
 	
-	new String:sBuffer[256] = "Show preview: ";
+	char sBuffer[256] = "Show preview: ";
 	switch (g_ClientMenuState[client][CMS_previewMode])
 	{
 		case ZPM_aim:
@@ -3221,17 +3219,17 @@ DisplayZonePointEditMenu(client)
 		case ZPM_feet:
 			StrCat(sBuffer, sizeof(sBuffer), "At your feet");
 	}
-	AddMenuItem(hMenu, "togglepreview", sBuffer);
+	hMenu.AddItem("togglepreview", sBuffer);
 	
 	Format(sBuffer, sizeof(sBuffer), "Stepsize: %.0f", g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
-	AddMenuItem(hMenu, "togglestepsize", sBuffer);
+	hMenu.AddItem("togglestepsize", sBuffer);
 	
 	if (g_ClientMenuState[client][CMS_aimCapDistance] < 0.0)
 	{
 		Format(sBuffer, sizeof(sBuffer), "Max. aim distance: Disabled");
 		if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
 			Format(sBuffer, sizeof(sBuffer), "%s\nHold rightclick and move mouse up and down to change.", sBuffer);
-		AddMenuItem(hMenu, "resetaimdistance", sBuffer, ITEMDRAW_DISABLED);
+		hMenu.AddItem("resetaimdistance", sBuffer, ITEMDRAW_DISABLED);
 	}
 	else
 	{
@@ -3239,30 +3237,30 @@ DisplayZonePointEditMenu(client)
 		if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
 			Format(sBuffer, sizeof(sBuffer), "%s\nHold rightclick and move mouse up and down to change.", sBuffer);
 		Format(sBuffer, sizeof(sBuffer), "%s\nSelect menu option to remove limit.", sBuffer);
-		AddMenuItem(hMenu, "resetaimdistance", sBuffer);
+		hMenu.AddItem("resetaimdistance", sBuffer);
 	}
 	
 	Format(sBuffer, sizeof(sBuffer), "Snap to map grid: %s", g_ClientMenuState[client][CMS_snapToGrid]?"Enabled":"Disabled");
-	AddMenuItem(hMenu, "togglegridsnap", sBuffer);
+	hMenu.AddItem("togglegridsnap", sBuffer);
 	
 	if(!g_ClientMenuState[client][CMS_addZone])
-		AddMenuItem(hMenu, "axismenu", "Move point on axes through menu");
+		hMenu.AddItem("axismenu", "Move point on axes through menu");
 	
-	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+	hMenu.Display(client, MENU_TIME_FOREVER);
 }
 
-public Menu_HandleZonePointEdit(Handle:menu, MenuAction:action, param1, param2)
+public int Menu_HandleZonePointEdit(Menu menu, MenuAction action, int param1, int param2)
 {
 	if(action == MenuAction_End)
 	{
-		CloseHandle(menu);
+		delete menu;
 	}
 	else if(action == MenuAction_Select)
 	{
-		new String:sInfo[32];
-		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		char sInfo[32];
+		menu.GetItem(param2, sInfo, sizeof(sInfo));
 		
-		new group[ZoneGroup];
+		int group[ZoneGroup];
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 		
 		if(StrEqual(sInfo, "save"))
@@ -3314,7 +3312,7 @@ public Menu_HandleZonePointEdit(Handle:menu, MenuAction:action, param1, param2)
 			return;
 		}
 		
-		new bool:bAdding = g_ClientMenuState[param1][CMS_addZone];
+		bool bAdding = g_ClientMenuState[param1][CMS_addZone];
 		g_ClientMenuState[param1][CMS_editCenter] = false;
 		g_ClientMenuState[param1][CMS_editPosition] = false;
 		g_ClientMenuState[param1][CMS_editState] = ZES_first;
@@ -3338,9 +3336,9 @@ public Menu_HandleZonePointEdit(Handle:menu, MenuAction:action, param1, param2)
 	}
 }
 
-SaveZonePointModifications(client, group[ZoneGroup])
+void SaveZonePointModifications(int client, int group[ZoneGroup])
 {
-	new zoneData[ZoneData];
+	int zoneData[ZoneData];
 	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 	// Save the new center of the zone.
 	// The rotation and mins/maxs stay the same, so not much to do.
@@ -3370,64 +3368,64 @@ SaveZonePointModifications(client, group[ZoneGroup])
 	TriggerTimer(g_hShowZonesTimer, true);
 }
 
-DisplayPointAxisModificationMenu(client)
+void DisplayPointAxisModificationMenu(int client)
 {
-	new group[ZoneGroup], zoneData[ZoneData];
+	int group[ZoneGroup], zoneData[ZoneData];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 	
-	new Handle:hMenu = CreateMenu(Menu_HandlePointAxisEdit);
-	SetMenuPagination(hMenu, MENU_NO_PAGINATION);
+	Menu hMenu = new Menu(Menu_HandlePointAxisEdit);
+	hMenu.Pagination = MENU_NO_PAGINATION;
 	
-	new String:sBuffer[256];
+	char sBuffer[256];
 	if(g_ClientMenuState[client][CMS_editCenter])
 	{
 		Format(sBuffer, sizeof(sBuffer), "Edit center of zone \"%s\"", zoneData[ZD_name]);
 	}
 	else
 	{
-		Format(sBuffer, sizeof(sBuffer), "Edit zone \"%s\" position %d", zoneData[ZD_name], _:g_ClientMenuState[client][CMS_editState]+1);
+		Format(sBuffer, sizeof(sBuffer), "Edit zone \"%s\" position %d", zoneData[ZD_name], view_as<int>(g_ClientMenuState[client][CMS_editState])+1);
 	}
 	Format(sBuffer, sizeof(sBuffer), "%s\nMove position along the axes.", sBuffer);
-	SetMenuTitle(hMenu, sBuffer);
+	hMenu.SetTitle(sBuffer);
 	
-	AddMenuItem(hMenu, "save", "Save changes");
+	hMenu.AddItem("save", "Save changes");
 	
 	Format(sBuffer, sizeof(sBuffer), "Stepsize: %.0f\n \n", g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
-	AddMenuItem(hMenu, "togglestepsize", sBuffer);
+	hMenu.AddItem("togglestepsize", sBuffer);
 
-	AddMenuItem(hMenu, "ax", "Add to X axis (red)");
-	AddMenuItem(hMenu, "sx", "Subtract from X axis");
-	AddMenuItem(hMenu, "ay", "Add to Y axis (green)");
-	AddMenuItem(hMenu, "sy", "Subtract from Y axis");
-	AddMenuItem(hMenu, "az", "Add to Z axis (blue)");
-	AddMenuItem(hMenu, "sz", "Subtract from Z axis\n \n");
+	hMenu.AddItem("ax", "Add to X axis (red)");
+	hMenu.AddItem("sx", "Subtract from X axis");
+	hMenu.AddItem("ay", "Add to Y axis (green)");
+	hMenu.AddItem("sy", "Subtract from Y axis");
+	hMenu.AddItem("az", "Add to Z axis (blue)");
+	hMenu.AddItem("sz", "Subtract from Z axis\n \n");
 	
 	// Push the button number to the last in the menu.
-	if (GetMaxPageItems(GetMenuStyle(hMenu)) > 9)
-		AddMenuItem(hMenu, "", "", ITEMDRAW_DISABLED|ITEMDRAW_SPACER);
+	if (GetMaxPageItems(hMenu.Style) > 9)
+		hMenu.AddItem("", "", ITEMDRAW_DISABLED|ITEMDRAW_SPACER);
 	
 	// Simulate our own back button..
 	Format(sBuffer, sizeof(sBuffer), "%T", "Back", client);
-	AddMenuItem(hMenu, "back", sBuffer);
+	hMenu.AddItem("back", sBuffer);
 	
-	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+	hMenu.Display(client, MENU_TIME_FOREVER);
 }
 
-public Menu_HandlePointAxisEdit(Handle:menu, MenuAction:action, param1, param2)
+public int Menu_HandlePointAxisEdit(Menu menu, MenuAction action, int param1, int param2)
 {
 	if(action == MenuAction_End)
 	{
-		CloseHandle(menu);
+		delete menu;
 	}
 	else if(action == MenuAction_Select)
 	{
-		new String:sInfo[32];
-		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		char sInfo[32];
+		menu.GetItem(param2, sInfo, sizeof(sInfo));
 		
 		if(StrEqual(sInfo, "save"))
 		{
-			new group[ZoneGroup];
+			int group[ZoneGroup];
 			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 			SaveZonePointModifications(param1, group);
 			return;
@@ -3448,11 +3446,11 @@ public Menu_HandlePointAxisEdit(Handle:menu, MenuAction:action, param1, param2)
 		}
 		
 		// Add to x
-		new Float:fValue = g_fStepsizes[g_ClientMenuState[param1][CMS_stepSizeIndex]];
+		float fValue = g_fStepsizes[g_ClientMenuState[param1][CMS_stepSizeIndex]];
 		if(sInfo[0] == 's')
 			fValue *= -1.0;
 		
-		new iAxis = sInfo[1] - 'x';
+		int iAxis = sInfo[1] - 'x';
 		
 		// Apply value to selected point of the zone.
 		if(g_ClientMenuState[param1][CMS_editCenter])
@@ -3481,38 +3479,38 @@ public Menu_HandlePointAxisEdit(Handle:menu, MenuAction:action, param1, param2)
 	}
 }
 
-DisplayZoneRotationMenu(client)
+void DisplayZoneRotationMenu(int client)
 {
-	new group[ZoneGroup], zoneData[ZoneData];
+	int group[ZoneGroup], zoneData[ZoneData];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 	
-	new Handle:hMenu = CreateMenu(Menu_HandleZoneRotation);
-	SetMenuTitle(hMenu, "Rotate zone %s", zoneData[ZD_name]);
-	SetMenuExitBackButton(hMenu, true);
+	Menu hMenu = new Menu(Menu_HandleZoneRotation);
+	hMenu.SetTitle("Rotate zone %s", zoneData[ZD_name]);
+	hMenu.ExitBackButton = true;
 	
-	AddMenuItem(hMenu, "", "Hold \"e\" and move your mouse to rotate the box.", ITEMDRAW_DISABLED);
-	AddMenuItem(hMenu, "", "Hold \"shift\" too, to rotate around a different axis when moving mouse up and down.", ITEMDRAW_DISABLED);
+	hMenu.AddItem("", "Hold \"e\" and move your mouse to rotate the box.", ITEMDRAW_DISABLED);
+	hMenu.AddItem("", "Hold \"shift\" too, to rotate around a different axis when moving mouse up and down.", ITEMDRAW_DISABLED);
 	
-	AddMenuItem(hMenu, "save", "Save rotation");
-	AddMenuItem(hMenu, "reset", "Reset rotation");
-	AddMenuItem(hMenu, "discard", "Discard new rotation");
+	hMenu.AddItem("save", "Save rotation");
+	hMenu.AddItem("reset", "Reset rotation");
+	hMenu.AddItem("discard", "Discard new rotation");
 	
-	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+	hMenu.Display(client, MENU_TIME_FOREVER);
 }
 
-public Menu_HandleZoneRotation(Handle:menu, MenuAction:action, param1, param2)
+public int Menu_HandleZoneRotation(Menu menu, MenuAction action, int param1, int param2)
 {
 	if(action == MenuAction_End)
 	{
-		CloseHandle(menu);
+		delete menu;
 	}
 	else if(action == MenuAction_Select)
 	{
-		new String:sInfo[32];
-		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		char sInfo[32];
+		menu.GetItem(param2, sInfo, sizeof(sInfo));
 		
-		new group[ZoneGroup], zoneData[ZoneData];
+		int group[ZoneGroup], zoneData[ZoneData];
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 		GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
 		
@@ -3557,61 +3555,61 @@ public Menu_HandleZoneRotation(Handle:menu, MenuAction:action, param1, param2)
 	}
 }
 
-DisplayZoneAddFinalizationMenu(client)
+void DisplayZoneAddFinalizationMenu(int client)
 {
 	if(g_ClientMenuState[client][CMS_group] == -1)
 		return;
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	
-	new Handle:hMenu = CreateMenu(Menu_HandleAddFinalization);
+	Menu hMenu = new Menu(Menu_HandleAddFinalization);
 	if(g_ClientMenuState[client][CMS_cluster] == -1)
-		SetMenuTitle(hMenu, "Save new zone in group \"%s\"?", group[ZG_name]);
+		hMenu.SetTitle("Save new zone in group \"%s\"?", group[ZG_name]);
 	else
 	{
-		new zoneCluster[ZoneCluster];
+		int zoneCluster[ZoneCluster];
 		GetZoneClusterByIndex(g_ClientMenuState[client][CMS_cluster], group, zoneCluster);
-		SetMenuTitle(hMenu, "Save new zone in cluster \"%s\" of group \"%s\"?", zoneCluster[ZC_name], group[ZG_name]);
+		hMenu.SetTitle("Save new zone in cluster \"%s\" of group \"%s\"?", zoneCluster[ZC_name], group[ZG_name]);
 	}
-	SetMenuExitBackButton(hMenu, true);
+	hMenu.ExitBackButton = true;
 	
-	new String:sBuffer[128];
+	char sBuffer[128];
 	// When pasting a zone we want to edit the center position afterwards right away.
 	if(g_ClientMenuState[client][CMS_editCenter])
 	{
 		Format(sBuffer, sizeof(sBuffer), "Pasting new copy of zone \"%s\".\nYou can place the copy after giving it a name.", g_Clipboard[client][CB_name]);
-		AddMenuItem(hMenu, "", sBuffer, ITEMDRAW_DISABLED);
+		hMenu.AddItem("", sBuffer, ITEMDRAW_DISABLED);
 	}
 	
-	AddMenuItem(hMenu, "", "Type zone name in chat to save it. (\"!abort\" to abort)", ITEMDRAW_DISABLED);
+	hMenu.AddItem("", "Type zone name in chat to save it. (\"!abort\" to abort)", ITEMDRAW_DISABLED);
 	
 	GetFreeAutoZoneName(group, sBuffer, sizeof(sBuffer));
 	Format(sBuffer, sizeof(sBuffer), "Use auto-generated zone name (%s)", sBuffer);
-	AddMenuItem(hMenu, "autoname", sBuffer);
-	AddMenuItem(hMenu, "discard", "Discard new zone");
+	hMenu.AddItem("autoname", sBuffer);
+	hMenu.AddItem("discard", "Discard new zone");
 	
-	DisplayMenu(hMenu, client, MENU_TIME_FOREVER);
+	hMenu.Display(client, MENU_TIME_FOREVER);
 }
 
-public Menu_HandleAddFinalization(Handle:menu, MenuAction:action, param1, param2)
+public int Menu_HandleAddFinalization(Menu menu, MenuAction action, int param1, int param2)
 {
 	if(action == MenuAction_End)
 	{
-		CloseHandle(menu);
+		delete menu;
 	}
 	else if(action == MenuAction_Select)
 	{
-		new String:sInfo[32];
-		GetMenuItem(menu, param2, sInfo, sizeof(sInfo));
+		char sInfo[32];
+		menu.GetItem(param2, sInfo, sizeof(sInfo));
 		
-		new group[ZoneGroup];
+		int group[ZoneGroup];
 		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 		
 		// Add the zone using a generated name
 		if(StrEqual(sInfo, "autoname"))
 		{
-			new String:sBuffer[128];
+			char sBuffer[128];
 			GetFreeAutoZoneName(group, sBuffer, sizeof(sBuffer));
 			SaveNewZone(param1, sBuffer);
 		}
@@ -3671,7 +3669,7 @@ public Menu_HandleAddFinalization(Handle:menu, MenuAction:action, param1, param2
 	}
 }
 
-bool:TryCallMenuCancelForward(client, cancelReason)
+bool TryCallMenuCancelForward(int client, int cancelReason)
 {
 	// See if we need to call the menu cancel forward, if this menu was opened by a plugin
 	if (!g_ClientMenuState[client][CMS_backToMenuAfterEdit])
@@ -3680,7 +3678,7 @@ bool:TryCallMenuCancelForward(client, cancelReason)
 	// Reset this state again, so we can navigate the menu normally.
 	g_ClientMenuState[client][CMS_backToMenuAfterEdit] = false;
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	// No cancel callback registered for this group?
 	if (!group[ZG_menuCancelForward])
@@ -3698,45 +3696,45 @@ bool:TryCallMenuCancelForward(client, cancelReason)
 /**
  * Zone information persistence in configs
  */
-LoadAllGroupZones()
+void LoadAllGroupZones()
 {
-	new group[ZoneGroup];
-	new iSize = GetArraySize(g_hZoneGroups);
-	for(new i=0;i<iSize;i++)
+	int group[ZoneGroup];
+	int iSize = g_hZoneGroups.Length;
+	for(int i=0;i<iSize;i++)
 	{
 		GetGroupByIndex(i, group);
 		LoadZoneGroup(group);
 	}
 }
 
-bool:LoadZoneGroup(group[ZoneGroup])
+bool LoadZoneGroup(group[ZoneGroup])
 {
-	decl String:sPath[PLATFORM_MAX_PATH];
+	char sPath[PLATFORM_MAX_PATH];
 	BuildPath(Path_SM, sPath, sizeof(sPath), "configs/mapzonelib/%s/%s.zones", group[ZG_name], g_sCurrentMap);
 	
 	if(!FileExists(sPath))
 		return false;
 	
-	new Handle:hKV = CreateKeyValues("MapZoneGroup");
+	KeyValues hKV = new KeyValues("MapZoneGroup");
 	if(!hKV)
 		return false;
 	
 	// Allow \" and \n escapeing
-	KvSetEscapeSequences(hKV, true);
+	hKV.SetEscapeSequences(true);
 	
-	if(!FileToKeyValues(hKV, sPath))
+	if(!hKV.ImportFromFile(sPath))
 		return false;
 	
-	if(!KvGotoFirstSubKey(hKV))
+	if(!hKV.GotoFirstSubKey())
 		return false;
 	
-	new Float:vBuf[3], String:sZoneName[MAX_ZONE_NAME];
-	new String:sBuffer[32];
-	new zoneCluster[ZoneCluster];
+	float vBuf[3];
+	char sBuffer[32], sZoneName[MAX_ZONE_NAME];
+	int zoneCluster[ZoneCluster];
 	zoneCluster[ZC_index] = -1;
 	
 	do {
-		KvGetSectionName(hKV, sBuffer, sizeof(sBuffer));
+		hKV.GetSectionName(sBuffer, sizeof(sBuffer));
 		// This is the start of a cluster group.
 		if(!StrContains(sBuffer, "cluster", false))
 		{
@@ -3745,93 +3743,93 @@ bool:LoadZoneGroup(group[ZoneGroup])
 				continue;
 			
 			// Get the cluster name
-			KvGetString(hKV, "name", sZoneName, sizeof(sZoneName), "unnamed");
+			hKV.GetString("name", sZoneName, sizeof(sZoneName), "unnamed");
 			strcopy(zoneCluster[ZC_name][0], MAX_ZONE_NAME, sZoneName);
-			zoneCluster[ZC_teamFilter] = KvGetNum(hKV, "team");
+			zoneCluster[ZC_teamFilter] = hKV.GetNum("team");
 			
-			new iColor[4];
-			KvGetColor(hKV, "color", iColor[0], iColor[1], iColor[2], iColor[3]);
+			int iColor[4];
+			hKV.GetColor("color", iColor[0], iColor[1], iColor[2], iColor[3]);
 			if (iColor[0] == 0 && iColor[1] == 0 && iColor[2] == 0 && iColor[3] == 0)
 				Array_Fill(iColor, sizeof(iColor), -1);
 			Array_Copy(iColor, zoneCluster[ZC_color], sizeof(iColor));
 			
 			// See if there is a custom keyvalues section for this cluster.
-			if(KvJumpToKey(hKV, "custom", false) && KvGotoFirstSubKey(hKV, false))
+			if(hKV.JumpToKey("custom", false) && hKV.GotoFirstSubKey(false))
 			{
-				zoneCluster[ZC_customKV] = CreateTrie();
+				zoneCluster[ZC_customKV] = new StringMap();
 				ParseCustomKeyValues(hKV, zoneCluster[ZC_customKV]);
-				KvGoBack(hKV); // KvGotoFirstSubKey
-				KvGoBack(hKV); // KvJumpToKey
+				hKV.GoBack(); // KvGotoFirstSubKey
+				hKV.GoBack(); // KvJumpToKey
 			}
 			
-			zoneCluster[ZC_index] = GetArraySize(group[ZG_cluster]);
-			PushArrayArray(group[ZG_cluster], zoneCluster[0], _:ZoneCluster);
+			zoneCluster[ZC_index] = group[ZG_cluster].Length;
+			group[ZG_cluster].PushArray(zoneCluster[0], view_as<int>(ZoneCluster));
 			
 			// Step inside this group
-			KvGotoFirstSubKey(hKV);
+			hKV.GotoFirstSubKey();
 		}
 		
 		// Don't parse the custom section as a zone of a cluster.
-		KvGetSectionName(hKV, sBuffer, sizeof(sBuffer));
+		hKV.GetSectionName(sBuffer, sizeof(sBuffer));
 		if (StrEqual(sBuffer, "custom", false))
 			continue;
 		
-		new zoneData[ZoneData];
-		KvGetVector(hKV, "pos", vBuf);
+		int zoneData[ZoneData];
+		hKV.GetVector("pos", vBuf);
 		Array_Copy(vBuf, zoneData[ZD_position], 3);
 		
-		KvGetVector(hKV, "mins", vBuf);
+		hKV.GetVector("mins", vBuf);
 		Array_Copy(vBuf, zoneData[ZD_mins], 3);
 		
-		KvGetVector(hKV, "maxs", vBuf);
+		hKV.GetVector("maxs", vBuf);
 		Array_Copy(vBuf, zoneData[ZD_maxs], 3);
 		
-		KvGetVector(hKV, "rotation", vBuf);
+		hKV.GetVector("rotation", vBuf);
 		Array_Copy(vBuf, zoneData[ZD_rotation], 3);
 		
-		zoneData[ZD_teamFilter] = KvGetNum(hKV, "team");
+		zoneData[ZD_teamFilter] = hKV.GetNum("team");
 		
-		new iColor[4];
-		KvGetColor(hKV, "color", iColor[0], iColor[1], iColor[2], iColor[3]);
+		int iColor[4];
+		hKV.GetColor("color", iColor[0], iColor[1], iColor[2], iColor[3]);
 		if (iColor[0] == 0 && iColor[1] == 0 && iColor[2] == 0 && iColor[3] == 0)
 				Array_Fill(iColor, sizeof(iColor), -1);
 		Array_Copy(iColor, zoneData[ZD_color], sizeof(iColor));
 		
-		KvGetString(hKV, "name", sZoneName, sizeof(sZoneName), "unnamed");
+		hKV.GetString("name", sZoneName, sizeof(sZoneName), "unnamed");
 		strcopy(zoneData[ZD_name][0], MAX_ZONE_NAME, sZoneName);
 		
 		// See if there is a custom keyvalues section for this zone.
 		// Step inside.
-		if(KvJumpToKey(hKV, "custom", false) && KvGotoFirstSubKey(hKV, false))
+		if(hKV.JumpToKey("custom", false) && hKV.GotoFirstSubKey(false))
 		{
 			//if(zoneCluster[ZC_index] != -1)
 			//{
 			//	LogError("No custom keyvalues allowed in individual cluster zones (%s, %s, %s)", group[ZG_name], zoneCluster[ZC_name], zoneData[ZD_name]);
 			//}
-			zoneData[ZD_customKV] = CreateTrie();
+			zoneData[ZD_customKV] = new StringMap();
 			ParseCustomKeyValues(hKV, zoneData[ZD_customKV]);
-			KvGoBack(hKV); // KvGotoFirstSubKey
-			KvGoBack(hKV); // KvJumpToKey
+			hKV.GoBack(); // KvGotoFirstSubKey
+			hKV.GoBack(); // KvJumpToKey
 		}
 		
 		zoneData[ZD_clusterIndex] = zoneCluster[ZC_index];
 		
 		zoneData[ZD_triggerEntity] = INVALID_ENT_REFERENCE;
-		zoneData[ZD_index] = GetArraySize(group[ZG_zones]);
-		PushArrayArray(group[ZG_zones], zoneData[0], _:ZoneData);
+		zoneData[ZD_index] = group[ZG_zones].Length;
+		group[ZG_zones].PushArray(zoneData[0], view_as<int>(ZoneData));
 		
 		// Step out of the cluster group if we reached the end.
-		KvSavePosition(hKV);
-		if(!KvGotoNextKey(hKV) && zoneCluster[ZC_index] != -1)
+		hKV.SavePosition();
+		if(!hKV.GotoNextKey() && zoneCluster[ZC_index] != -1)
 		{
 			zoneCluster[ZC_index] = -1;
-			KvGoBack(hKV);
+			hKV.GoBack();
 		}
-		KvGoBack(hKV);
+		hKV.GoBack();
 		
-	} while(KvGotoNextKey(hKV));
+	} while(hKV.GotoNextKey());
 	
-	CloseHandle(hKV);
+	delete hKV;
 	
 	// Inform all other plugins that these zones and clusters exist now.
 	CallOnCreatedForAllInGroup(group);
@@ -3839,30 +3837,30 @@ bool:LoadZoneGroup(group[ZoneGroup])
 	return true;
 }
 
-ParseCustomKeyValues(Handle:hKV, Handle:hCustomKV)
+void ParseCustomKeyValues(KeyValues hKV, StringMap hCustomKV)
 {
-	new String:sKey[128], String:sValue[256];
+	char sKey[128], sValue[256];
 	do
 	{
-		KvGetSectionName(hKV, sKey, sizeof(sKey));
-		KvGetString(hKV, NULL_STRING, sValue, sizeof(sValue));
-		SetTrieString(hCustomKV, sKey, sValue, true);
-	} while (KvGotoNextKey(hKV, false));
+		hKV.GetSectionName(sKey, sizeof(sKey));
+		hKV.GetString(NULL_STRING, sValue, sizeof(sValue));
+		hCustomKV.SetString(sKey, sValue, true);
+	} while (hKV.GotoNextKey(false));
 }
 
 // Save the zones to the config files and optionally to the database too.
-SaveAllZoneGroups()
+void SaveAllZoneGroups()
 {
 	SaveAllZoneGroupsToFile();
 	if (g_hDatabase)
 		SaveAllZoneGroupsToDatabase();
 }
 
-SaveAllZoneGroupsToFile()
+void SaveAllZoneGroupsToFile()
 {
-	new group[ZoneGroup];
-	new iSize = GetArraySize(g_hZoneGroups);
-	for(new i=0;i<iSize;i++)
+	int group[ZoneGroup];
+	int iSize = g_hZoneGroups.Length;
+	for(int i=0;i<iSize;i++)
 	{
 		GetGroupByIndex(i, group);
 		if(!SaveZoneGroupToFile(group))
@@ -3870,10 +3868,10 @@ SaveAllZoneGroupsToFile()
 	}
 }
 
-bool:SaveZoneGroupToFile(group[ZoneGroup])
+bool SaveZoneGroupToFile(int group[ZoneGroup])
 {
-	decl String:sPath[PLATFORM_MAX_PATH];
-	new iMode = FPERM_U_READ|FPERM_U_WRITE|FPERM_U_EXEC|FPERM_G_READ|FPERM_G_WRITE|FPERM_G_EXEC|FPERM_O_READ|FPERM_O_EXEC;
+	char sPath[PLATFORM_MAX_PATH];
+	int iMode = FPERM_U_READ|FPERM_U_WRITE|FPERM_U_EXEC|FPERM_G_READ|FPERM_G_WRITE|FPERM_G_EXEC|FPERM_O_READ|FPERM_O_EXEC;
 	// Have mercy and even create the root config file directory.
 	BuildPath(Path_SM, sPath, sizeof(sPath),  "configs/mapzonelib");
 	if(!DirExists(sPath))
@@ -3889,47 +3887,48 @@ bool:SaveZoneGroupToFile(group[ZoneGroup])
 			return false;
 	}
 	
-	new Handle:hKV = CreateKeyValues("MapZoneGroup");
+	KeyValues hKV = new KeyValues("MapZoneGroup");
 	if(!hKV)
 		return false;
 	
 	// Allow \" and \n escapeing
-	KvSetEscapeSequences(hKV, true);
+	hKV.SetEscapeSequences(true);
 	
 	// Add all zones of this group to the keyvalues file.
 	// Add normal zones without a cluster first.
-	new bool:bZonesAdded = CreateZoneSectionsInKV(hKV, group, -1);
+	bool bZonesAdded = CreateZoneSectionsInKV(hKV, group, -1);
 	
-	new iNumClusters = GetArraySize(group[ZG_cluster]);
-	new zoneCluster[ZoneCluster], iIndex, String:sIndex[32];
-	for(new i=0;i<iNumClusters;i++)
+	int iNumClusters = group[ZG_cluster].Length;
+	int zoneCluster[ZoneCluster], iIndex;
+	char sIndex[32];
+	for(int i=0;i<iNumClusters;i++)
 	{
 		GetZoneClusterByIndex(i, group, zoneCluster);
 		if(zoneCluster[ZC_deleted])
 			continue;
 		
 		Format(sIndex, sizeof(sIndex), "cluster%d", iIndex++);
-		KvJumpToKey(hKV, sIndex, true);
-		KvSetString(hKV, "name", zoneCluster[ZC_name]);
-		KvSetNum(hKV, "team", zoneCluster[ZC_teamFilter]);
+		hKV.JumpToKey(sIndex, true);
+		hKV.SetString("name", zoneCluster[ZC_name]);
+		hKV.SetNum("team", zoneCluster[ZC_teamFilter]);
 		// Only set the color to the KV if it was set.
 		if (zoneCluster[ZC_color][0] >= 0)
-			KvSetColor(hKV, "color", zoneCluster[ZC_color][0], zoneCluster[ZC_color][1], zoneCluster[ZC_color][2], zoneCluster[ZC_color][3]);
+			hKV.SetColor("color", zoneCluster[ZC_color][0], zoneCluster[ZC_color][1], zoneCluster[ZC_color][2], zoneCluster[ZC_color][3]);
 		
 		AddCustomKeyValues(hKV, zoneCluster[ZC_customKV]);
 		
 		// Run through all zones and add the ones that belong to this cluster.
 		bZonesAdded |= CreateZoneSectionsInKV(hKV, group, zoneCluster[ZC_index]);
 		
-		KvGoBack(hKV);
+		hKV.GoBack();
 	}
 	
-	KvRewind(hKV);
+	hKV.Rewind();
 	BuildPath(Path_SM, sPath, sizeof(sPath), "configs/mapzonelib/%s/%s.zones", group[ZG_name], g_sCurrentMap);
 	// Only add zones, if there are any for this map.
 	if(bZonesAdded)
 	{
-		if(!KeyValuesToFile(hKV, sPath))
+		if(!hKV.ExportToFile(sPath))
 			LogError("Error saving zones to file %s.", sPath);
 	}
 	else
@@ -3937,17 +3936,19 @@ bool:SaveZoneGroupToFile(group[ZoneGroup])
 		// Remove the zone config otherwise, so we don't keep empty files around.
 		DeleteFile(sPath);
 	}
-	CloseHandle(hKV);
+	delete hKV;
 	
 	return true;
 }
 
-bool:CreateZoneSectionsInKV(Handle:hKV, group[ZoneGroup], iClusterIndex)
+bool CreateZoneSectionsInKV(KeyValues hKV, int group[ZoneGroup], int iClusterIndex)
 {
-	new String:sIndex[16], zoneData[ZoneData], Float:vBuf[3], String:sColor[64];
-	new iSize = GetArraySize(group[ZG_zones]);
-	new bool:bZonesAdded, iIndex;
-	for(new i=0;i<iSize;i++)
+	char sIndex[16], sColor[64];
+	int zoneData[ZoneData], iIndex;
+	float vBuf[3];
+	int iSize = group[ZG_zones].Length;
+	bool bZonesAdded;
+	for(int i=0;i<iSize;i++)
 	{
 		GetZoneByIndex(i, group, zoneData);
 		if(zoneData[ZD_deleted])
@@ -3960,63 +3961,63 @@ bool:CreateZoneSectionsInKV(Handle:hKV, group[ZoneGroup], iClusterIndex)
 		bZonesAdded = true;
 		
 		IntToString(iIndex++, sIndex, sizeof(sIndex));
-		KvJumpToKey(hKV, sIndex, true);
+		hKV.JumpToKey(sIndex, true);
 		
 		Array_Copy(zoneData[ZD_position], vBuf, 3);
-		KvSetVector(hKV, "pos", vBuf);
+		hKV.SetVector("pos", vBuf);
 		Array_Copy(zoneData[ZD_mins], vBuf, 3);
-		KvSetVector(hKV, "mins", vBuf);
+		hKV.SetVector("mins", vBuf);
 		Array_Copy(zoneData[ZD_maxs], vBuf, 3);
-		KvSetVector(hKV, "maxs", vBuf);
+		hKV.SetVector("maxs", vBuf);
 		Array_Copy(zoneData[ZD_rotation], vBuf, 3);
-		KvSetVector(hKV, "rotation", vBuf);
-		KvSetNum(hKV, "team", zoneData[ZD_teamFilter]);
+		hKV.SetVector("rotation", vBuf);
+		hKV.SetNum("team", zoneData[ZD_teamFilter]);
 		// Only set the color to the KV if it was set.
 		if (zoneData[ZD_color][0] >= 0)
 		{
 			Format(sColor, sizeof(sColor), "%d %d %d %d", zoneData[ZD_color][0], zoneData[ZD_color][1], zoneData[ZD_color][2], zoneData[ZD_color][3]);
 			// KvSetColor isn't implemented in the SDK when saving to file.
-			KvSetString(hKV, "color", sColor);
+			hKV.SetString("color", sColor);
 		}
-		KvSetString(hKV, "name", zoneData[ZD_name]);
+		hKV.SetString("name", zoneData[ZD_name]);
 		
 		AddCustomKeyValues(hKV, zoneData[ZD_customKV]);
 		
-		KvGoBack(hKV);
+		hKV.GoBack();
 	}
 	
 	return bZonesAdded;
 }
 
-AddCustomKeyValues(Handle:hKV, Handle:hCustomKV)
+void AddCustomKeyValues(KeyValues hKV, StringMap hCustomKV)
 {
-	if (hCustomKV == INVALID_HANDLE || GetTrieSize(hCustomKV) == 0)
+	if (hCustomKV == INVALID_HANDLE || hCustomKV.Size == 0)
 		return;
 	
-	KvJumpToKey(hKV, "custom", true);
+	hKV.JumpToKey("custom", true);
 	
-	new Handle:hTrieSnapshot = CreateTrieSnapshot(hCustomKV);
+	StringMapSnapshot hTrieSnapshot = hCustomKV.Snapshot();
 	
-	new iSize = TrieSnapshotLength(hTrieSnapshot);
-	new String:sKey[128], String:sValue[256];
-	for (new i=0; i<iSize; i++)
+	int iSize = hTrieSnapshot.Length;
+	char sKey[128], sValue[256];
+	for (int i=0; i<iSize; i++)
 	{
-		GetTrieSnapshotKey(hTrieSnapshot, i, sKey, sizeof(sKey));
-		GetTrieString(hCustomKV, sKey, sValue, sizeof(sValue));
-		KvSetString(hKV, sKey, sValue);
+		hTrieSnapshot.GetKey(i, sKey, sizeof(sKey));
+		hCustomKV.GetString(sKey, sValue, sizeof(sValue));
+		hKV.SetString(sKey, sValue);
 	}
 	
-	CloseHandle(hTrieSnapshot);
-	KvGoBack(hKV);
+	delete hTrieSnapshot;
+	hKV.GoBack();
 }
 
 /**
  * SQL zone handling
  * This is optional and only active when setting the sm_mapzone_database_config convar.
  */
-public SQL_OnConnect(Handle:owner, Handle:hndl, const String:error[], any:data)
+public void SQL_OnConnect(Database db, const char[] error, any data)
 {
-	if (!hndl)
+	if (!db)
 	{
 		LogError("Error connecting to database: %s", error);
 		g_bConnectingToDatabase = false;
@@ -4027,58 +4028,58 @@ public SQL_OnConnect(Handle:owner, Handle:hndl, const String:error[], any:data)
 		return;
 	}
 	
-	g_hDatabase = hndl;
+	g_hDatabase = db;
 	
 	// Check if there are our tables in the database already.
-	new String:sQuery[1024];
+	char sQuery[1024];
 	Format(sQuery, sizeof(sQuery), "SELECT COUNT(*) FROM `%sclusters`", g_sTablePrefix);
-	SQL_TQuery(g_hDatabase, SQL_CheckTables, sQuery);
+	g_hDatabase.Query(SQL_CheckTables, sQuery);
 }
 
-public SQL_CheckTables(Handle:owner, Handle:hndl, const String:error[], any:data)
+public void SQL_CheckTables(Database db, DBResultSet results, const char[] error, any data)
 {
 	// Tables exists.
-	if (hndl)
+	if (results)
 	{
 		LoadAllGroupZonesFromDatabase(++g_iDatabaseSequence);
 		return;
 	}
 	
-	new String:sQuery[1024];
-	new Transaction:hTransaction = SQL_CreateTransaction();
+	char sQuery[1024];
+	Transaction hTransaction = new Transaction();
 	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%sclusters` (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, CONSTRAINT cluster_in_group UNIQUE (groupname, map, name))", g_sTablePrefix);
-	SQL_AddQuery(hTransaction, sQuery);
+	hTransaction.AddQuery(sQuery);
 	
 	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%szones` (id INT NOT NULL AUTO_INCREMENT, cluster_id INT NULL, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, pos_x FLOAT NOT NULL, pos_y FLOAT NOT NULL, pos_z FLOAT NOT NULL, min_x FLOAT NOT NULL, min_y FLOAT NOT NULL, min_z FLOAT NOT NULL, max_x FLOAT NOT NULL, max_y FLOAT NOT NULL, max_z FLOAT NOT NULL, rotation_x FLOAT NOT NULL, rotation_y FLOAT NOT NULL, rotation_z FLOAT NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, PRIMARY KEY (id), FOREIGN KEY (cluster_id) REFERENCES `%sclusters`(id) ON DELETE CASCADE, CONSTRAINT zone_in_group UNIQUE (groupname, map, name))", g_sTablePrefix, g_sTablePrefix);
-	SQL_AddQuery(hTransaction, sQuery);
+	hTransaction.AddQuery(sQuery);
 	
 	Format(sQuery, sizeof(sQuery), "CREATE FULLTEXT INDEX mapgroup on `%szones` (groupname, map)", g_sTablePrefix);
-	SQL_AddQuery(hTransaction, sQuery);
+	hTransaction.AddQuery(sQuery);
 	
 	Format(sQuery, sizeof(sQuery), "CREATE FULLTEXT INDEX mapgroup on `%sclusters` (groupname, map)", g_sTablePrefix);
-	SQL_AddQuery(hTransaction, sQuery);
+	hTransaction.AddQuery(sQuery);
 	
 	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%scustom_zone_keyvalues` (zone_id INT NOT NULL, setting VARCHAR(128) NOT NULL, val VARCHAR(256) NOT NULL, PRIMARY KEY (zone_id, setting), FOREIGN KEY (zone_id) REFERENCES `%szones`(id) ON DELETE CASCADE)", g_sTablePrefix, g_sTablePrefix);
-	SQL_AddQuery(hTransaction, sQuery);
+	hTransaction.AddQuery(sQuery);
 	
 	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%scustom_cluster_keyvalues` (cluster_id INT NOT NULL, setting VARCHAR(128) NOT NULL, val VARCHAR(256) NOT NULL, PRIMARY KEY (cluster_id, setting), FOREIGN KEY (cluster_id) REFERENCES `%sclusters`(id) ON DELETE CASCADE)", g_sTablePrefix, g_sTablePrefix);
-	SQL_AddQuery(hTransaction, sQuery);
+	hTransaction.AddQuery(sQuery);
 	
-	SQL_ExecuteTransaction(g_hDatabase, hTransaction, SQLTxn_CreateTablesSuccess, SQLTxn_CreateTablesFailure);
+	g_hDatabase.Execute(hTransaction, SQLTxn_CreateTablesSuccess, SQLTxn_CreateTablesFailure);
 }
 
-public SQLTxn_CreateTablesSuccess(Handle:db, any:data, numQueries, Handle:results[], any:queryData[])
+public void SQLTxn_CreateTablesSuccess(Database db, any data, int numQueries, Handle[] results, any[] queryData)
 {
 	// Nothing to load here :)
 }
 
-public SQLTxn_CreateTablesFailure(Handle:db, any:data, numQueries, const String:error[], failIndex, any:queryData[])
+public void SQLTxn_CreateTablesFailure(Database db, any data, int numQueries, const char[] error, int failIndex, any[] queryData)
 {
 	LogError("Error creating database tables (%d/%d). Falling back to local config files. Error: %s", failIndex, numQueries, error);
 	// Cannot use this database..
 	if (db)
-		CloseHandle(db);
-	g_hDatabase = INVALID_HANDLE;
+		delete db;
+	g_hDatabase = null;
 	
 	// Remove all zones.
 	ClearZonesInGroups();
@@ -4089,7 +4090,7 @@ public SQLTxn_CreateTablesFailure(Handle:db, any:data, numQueries, const String:
 }
 
 // Used in any error condition while loading maps from the database.
-LoadZonesFromConfigsInstead(group[ZoneGroup])
+void LoadZonesFromConfigsInstead(int group[ZoneGroup])
 {
 	// Remove zones of this group before that might already been loaded.
 	ClearZonesinGroup(group);
@@ -4099,71 +4100,71 @@ LoadZonesFromConfigsInstead(group[ZoneGroup])
 	SetupGroupZones(group);
 }
 
-LoadAllGroupZonesFromDatabase(iSequence)
+void LoadAllGroupZonesFromDatabase(int iSequence)
 {
-	new group[ZoneGroup];
-	new iSize = GetArraySize(g_hZoneGroups);
-	for(new i=0;i<iSize;i++)
+	int group[ZoneGroup];
+	int iSize = g_hZoneGroups.Length;
+	for(int i=0;i<iSize;i++)
 	{
 		GetGroupByIndex(i, group);
 		LoadZoneGroupFromDatabase(group, iSequence);
 	}
 }
 
-LoadZoneGroupFromDatabase(group[ZoneGroup], iSequence)
+void LoadZoneGroupFromDatabase(int group[ZoneGroup], int iSequence)
 {
-	new String:sMapEscaped[257], String:sGroupNameEscaped[MAX_ZONE_GROUP_NAME*2+1];
-	SQL_EscapeString(g_hDatabase, g_sCurrentMap, sMapEscaped, sizeof(sMapEscaped));
-	SQL_EscapeString(g_hDatabase, group[ZG_name], sGroupNameEscaped, sizeof(sGroupNameEscaped));
+	char sMapEscaped[257], sGroupNameEscaped[MAX_ZONE_GROUP_NAME*2+1];
+	g_hDatabase.Escape(g_sCurrentMap, sMapEscaped, sizeof(sMapEscaped));
+	g_hDatabase.Escape(group[ZG_name], sGroupNameEscaped, sizeof(sGroupNameEscaped));
 	
 	// First get all the clusters.
-	new String:sQuery[512];
+	char sQuery[512];
 	Format(sQuery, sizeof(sQuery), "SELECT id, name, team, color FROM `%sclusters` WHERE groupname = '%s' AND map = '%s'", g_sTablePrefix, sGroupNameEscaped, sMapEscaped);
-	new Handle:hPack = CreateDataPack();
-	WritePackCell(hPack, iSequence);
-	WritePackCell(hPack, group[ZG_index]);
-	SQL_TQuery(g_hDatabase, SQL_GetClusters, sQuery, hPack);
+	DataPack hPack = new DataPack();
+	hPack.WriteCell(iSequence);
+	hPack.WriteCell(group[ZG_index]);
+	g_hDatabase.Query(SQL_GetClusters, sQuery, hPack);
 }
 
-public SQL_GetClusters(Handle:owner, Handle:hndl, const String:error[], any:data)
+public void SQL_GetClusters(Database db, DBResultSet results, const char[] error, DataPack data)
 {
-	ResetPack(data);
-	new iSequence = ReadPackCell(data);
-	new iGroupIndex = ReadPackCell(data);
+	data.Reset();
+	int iSequence = data.ReadCell();
+	int iGroupIndex = data.ReadCell();
 	// This is old data. Discard everything.
 	if (iSequence != g_iDatabaseSequence)
 	{
-		CloseHandle(data);
+		delete data;
 		return;
 	}
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	GetGroupByIndex(iGroupIndex, group);
 	
-	if (!hndl)
+	if (!results)
 	{
 		LogError("Failed to get clusters: %s", error);
-		CloseHandle(data);
+		delete data;
 		LoadZonesFromConfigsInstead(group);
 		return;
 	}
 	
 	// SELECT id, name, team, color
-	new String:sClusterIDs[1024];
-	new zoneCluster[ZoneCluster], iColorInt;
-	while (SQL_FetchRow(hndl))
+	char sClusterIDs[1024];
+	int zoneCluster[ZoneCluster], iColorInt;
+	while (results.FetchRow())
 	{
-		zoneCluster[ZC_databaseId] = SQL_FetchInt(hndl, 0);
-		SQL_FetchString(hndl, 1, zoneCluster[ZC_name], MAX_ZONE_NAME);
-		zoneCluster[ZC_teamFilter] = SQL_FetchInt(hndl, 2);
-		iColorInt = SQL_FetchInt(hndl, 3);
+		zoneCluster[ZC_databaseId] = results.FetchInt(0);
+		results.FetchString(1, zoneCluster[ZC_name], MAX_ZONE_NAME);
+		zoneCluster[ZC_teamFilter] = results.FetchInt(2);
+		iColorInt = results.FetchInt(3);
 		zoneCluster[ZC_color][0] = (iColorInt >> 24) & 0xff;
 		zoneCluster[ZC_color][1] = (iColorInt >> 16) & 0xff;
 		zoneCluster[ZC_color][2] = (iColorInt >> 8) & 0xff;
 		zoneCluster[ZC_color][3] = iColorInt & 0xff;
 		
-		zoneCluster[ZC_index] = GetArraySize(group[ZG_cluster]);
-		PushArrayArray(group[ZG_cluster], zoneCluster[0], _:ZoneCluster);
+		zoneCluster[ZC_index] = group[ZG_cluster].Length;
+		group[ZG_cluster].PushArray(zoneCluster[0], view_as<int>(ZoneCluster));
 		
 		// Save all loaded cluster ids so we can load the custom keyvalues for them
 		if (sClusterIDs[0])
@@ -4177,113 +4178,113 @@ public SQL_GetClusters(Handle:owner, Handle:hndl, const String:error[], any:data
 		sClusterIDs = "-1"; // FIXME Save this query and go right to the next step if there are no clusters.
 	
 	// Now load all the custom key values for these clusters.
-	new String:sQuery[2048];
+	char sQuery[2048];
 	Format(sQuery, sizeof(sQuery), "SELECT cluster_id, setting, val FROM `%scustom_cluster_keyvalues` WHERE cluster_id IN(%s)", g_sTablePrefix, sClusterIDs);
-	SQL_TQuery(g_hDatabase, SQL_GetClusterKeyValues, sQuery, data);
+	g_hDatabase.Query(SQL_GetClusterKeyValues, sQuery, data);
 }
 
-public SQL_GetClusterKeyValues(Handle:owner, Handle:hndl, const String:error[], any:data)
+public void SQL_GetClusterKeyValues(Database db, DBResultSet results, const char[] error, DataPack data)
 {
-	ResetPack(data);
-	new iSequence = ReadPackCell(data);
-	new iGroupIndex = ReadPackCell(data);
+	data.Reset();
+	int iSequence = data.ReadCell();
+	int iGroupIndex = data.ReadCell();
 	// This is old data. Discard everything.
 	if (iSequence != g_iDatabaseSequence)
 	{
-		CloseHandle(data);
+		delete data;
 		return;
 	}
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	GetGroupByIndex(iGroupIndex, group);
 	
-	if (!hndl)
+	if (!results)
 	{
 		LogError("Failed to get cluster key values: %s", error);
-		CloseHandle(data);
+		delete data;
 		LoadZonesFromConfigsInstead(group);
 		return;
 	}
 	
 	// SELECT cluster_id, setting, val
-	new zoneCluster[ZoneCluster], iClusterIndex;
-	new String:sKey[64], String:sValue[64];
-	while (SQL_FetchRow(hndl))
+	int zoneCluster[ZoneCluster], iClusterIndex;
+	char sKey[64], sValue[64];
+	while (results.FetchRow())
 	{
-		iClusterIndex = FindValueInArray(group[ZG_cluster], SQL_FetchInt(hndl, 0), _:ZC_databaseId);
+		iClusterIndex = group[ZG_cluster].FindValue(results.FetchInt(0), view_as<int>(ZC_databaseId));
 		if (iClusterIndex == -1)
 			continue;
 		
 		GetZoneClusterByIndex(iClusterIndex, group, zoneCluster);
 		if (!zoneCluster[ZC_customKV])
 		{
-			zoneCluster[ZC_customKV] = CreateTrie();
+			zoneCluster[ZC_customKV] = new StringMap();
 			SaveCluster(group, zoneCluster);
 		}
 		
-		SQL_FetchString(hndl, 1, sKey, sizeof(sKey));
-		SQL_FetchString(hndl, 2, sValue, sizeof(sValue));
-		SetTrieString(zoneCluster[ZC_customKV], sKey, sValue);
+		results.FetchString(1, sKey, sizeof(sKey));
+		results.FetchString(2, sValue, sizeof(sValue));
+		zoneCluster[ZC_customKV].SetString(sKey, sValue);
 	}
 	
-	new String:sMapEscaped[257], String:sGroupNameEscaped[MAX_ZONE_GROUP_NAME*2+1];
-	SQL_EscapeString(g_hDatabase, g_sCurrentMap, sMapEscaped, sizeof(sMapEscaped));
-	SQL_EscapeString(g_hDatabase, group[ZG_name], sGroupNameEscaped, sizeof(sGroupNameEscaped));
+	char sMapEscaped[257], sGroupNameEscaped[MAX_ZONE_GROUP_NAME*2+1];
+	g_hDatabase.Escape(g_sCurrentMap, sMapEscaped, sizeof(sMapEscaped));
+	g_hDatabase.Escape(group[ZG_name], sGroupNameEscaped, sizeof(sGroupNameEscaped));
 	
 	// Now get all the zones in that group.
-	new String:sQuery[1024];
+	char sQuery[1024];
 	Format(sQuery, sizeof(sQuery), "SELECT id, cluster_id, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color FROM `%szones` WHERE groupname = '%s' AND map = '%s'", g_sTablePrefix, sGroupNameEscaped, sMapEscaped);
-	SQL_TQuery(g_hDatabase, SQL_GetZones, sQuery, data);
+	g_hDatabase.Query(SQL_GetZones, sQuery, data);
 }
 
-public SQL_GetZones(Handle:owner, Handle:hndl, const String:error[], any:data)
+public void SQL_GetZones(Database db, DBResultSet results, const char[] error, DataPack data)
 {
-	ResetPack(data);
-	new iSequence = ReadPackCell(data);
-	new iGroupIndex = ReadPackCell(data);
+	data.Reset();
+	int iSequence = data.ReadCell();
+	int iGroupIndex = data.ReadCell();
 	// This is old data. Discard everything.
 	if (iSequence != g_iDatabaseSequence)
 	{
-		CloseHandle(data);
+		delete data;
 		return;
 	}
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	GetGroupByIndex(iGroupIndex, group);
 	
-	if (!hndl)
+	if (!results)
 	{
 		LogError("Failed to get zones: %s", error);
-		CloseHandle(data);
+		delete data;
 		LoadZonesFromConfigsInstead(group);
 		return;
 	}
 	
 	// SELECT id, cluster_id, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color
-	new String:sZoneIDs[1024];
-	new zoneData[ZoneData], iColorInt;
-	while (SQL_FetchRow(hndl))
+	char sZoneIDs[1024];
+	int zoneData[ZoneData], iColorInt;
+	while (results.FetchRow())
 	{
-		zoneData[ZD_databaseId] = SQL_FetchInt(hndl, 0);
-		zoneData[ZD_clusterIndex] = FindValueInArray(group[ZG_cluster], SQL_FetchInt(hndl, 1), _:ZC_databaseId);
-		SQL_FetchString(hndl, 2, zoneData[ZD_name], MAX_ZONE_NAME);
-		for (new i=0; i<3; i++)
+		zoneData[ZD_databaseId] = results.FetchInt(0);
+		zoneData[ZD_clusterIndex] = group[ZG_cluster].FindValue(results.FetchInt(1), view_as<int>(ZC_databaseId));
+		results.FetchString(2, zoneData[ZD_name], MAX_ZONE_NAME);
+		for (int i=0; i<3; i++)
 		{
-			zoneData[ZD_position][i] = SQL_FetchFloat(hndl, i+3);
-			zoneData[ZD_mins][i] = SQL_FetchFloat(hndl, i+6);
-			zoneData[ZD_maxs][i] = SQL_FetchFloat(hndl, i+9);
-			zoneData[ZD_rotation][i] = SQL_FetchFloat(hndl, i+12);
+			zoneData[ZD_position][i] = results.FetchFloat(i+3);
+			zoneData[ZD_mins][i] = results.FetchFloat(i+6);
+			zoneData[ZD_maxs][i] = results.FetchFloat(i+9);
+			zoneData[ZD_rotation][i] = results.FetchFloat(i+12);
 		}
-		zoneData[ZD_teamFilter] = SQL_FetchInt(hndl, 15);
-		iColorInt = SQL_FetchInt(hndl, 16);
+		zoneData[ZD_teamFilter] = results.FetchInt(15);
+		iColorInt = results.FetchInt(16);
 		zoneData[ZD_color][0] = (iColorInt >> 24) & 0xff;
 		zoneData[ZD_color][1] = (iColorInt >> 16) & 0xff;
 		zoneData[ZD_color][2] = (iColorInt >> 8) & 0xff;
 		zoneData[ZD_color][3] = iColorInt & 0xff;
 		
 		zoneData[ZD_triggerEntity] = INVALID_ENT_REFERENCE;
-		zoneData[ZD_index] = GetArraySize(group[ZG_zones]);
-		PushArrayArray(group[ZG_zones], zoneData[0], _:ZoneData);
+		zoneData[ZD_index] = group[ZG_zones].Length;
+		group[ZG_zones].PushArray(zoneData[0], view_as<int>(ZoneData));
 		
 		// Save all loaded zone ids so we can load the custom keyvalues for them
 		if (sZoneIDs[0])
@@ -4297,17 +4298,17 @@ public SQL_GetZones(Handle:owner, Handle:hndl, const String:error[], any:data)
 		sZoneIDs = "-1";  // FIXME Save this query and go right to the next step if there are no zones.
 	
 	// Now load all the custom key values for these clusters.
-	new String:sQuery[2048];
+	char sQuery[2048];
 	Format(sQuery, sizeof(sQuery), "SELECT zone_id, setting, val FROM `%scustom_zone_keyvalues` WHERE zone_id IN(%s)", g_sTablePrefix, sZoneIDs);
-	SQL_TQuery(g_hDatabase, SQL_GetZoneKeyValues, sQuery, data);
+	g_hDatabase.Query(SQL_GetZoneKeyValues, sQuery, data);
 }
 
-public SQL_GetZoneKeyValues(Handle:owner, Handle:hndl, const String:error[], any:data)
+public void SQL_GetZoneKeyValues(Database db, DBResultSet results, const char[] error, DataPack data)
 {
-	ResetPack(data);
-	new iSequence = ReadPackCell(data);
-	new iGroupIndex = ReadPackCell(data);
-	CloseHandle(data);
+	data.Reset();
+	int iSequence = data.ReadCell();
+	int iGroupIndex = data.ReadCell();
+	delete data;
 	
 	// This is old data. Discard everything.
 	if (iSequence != g_iDatabaseSequence)
@@ -4315,10 +4316,10 @@ public SQL_GetZoneKeyValues(Handle:owner, Handle:hndl, const String:error[], any
 		return;
 	}
 	
-	new group[ZoneGroup];
+	int group[ZoneGroup];
 	GetGroupByIndex(iGroupIndex, group);
 	
-	if (!hndl)
+	if (!results)
 	{
 		LogError("Failed to get zones key values: %s", error);
 		LoadZonesFromConfigsInstead(group);
@@ -4326,24 +4327,24 @@ public SQL_GetZoneKeyValues(Handle:owner, Handle:hndl, const String:error[], any
 	}
 	
 	// SELECT zone_id, setting, val
-	new zoneData[ZoneData], iZoneIndex;
-	new String:sKey[64], String:sValue[64];
-	while (SQL_FetchRow(hndl))
+	int zoneData[ZoneData], iZoneIndex;
+	char sKey[64], sValue[64];
+	while (results.FetchRow())
 	{
-		iZoneIndex = FindValueInArray(group[ZG_zones], SQL_FetchInt(hndl, 0), _:ZD_databaseId);
+		iZoneIndex = group[ZG_zones].FindValue(results.FetchInt(0), view_as<int>(ZD_databaseId));
 		if (iZoneIndex == -1)
 			continue;
 		
 		GetZoneByIndex(iZoneIndex, group, zoneData);
 		if (!zoneData[ZD_customKV])
 		{
-			zoneData[ZD_customKV] = CreateTrie();
+			zoneData[ZD_customKV] = new StringMap();
 			SaveZone(group, zoneData);
 		}
 		
-		SQL_FetchString(hndl, 1, sKey, sizeof(sKey));
-		SQL_FetchString(hndl, 2, sValue, sizeof(sValue));
-		SetTrieString(zoneData[ZD_customKV], sKey, sValue);
+		results.FetchString(1, sKey, sizeof(sKey));
+		results.FetchString(2, sValue, sizeof(sValue));
+		zoneData[ZD_customKV].SetString(sKey, sValue);
 	}
 	
 	// Spawn the trigger_multiples for all zones
@@ -4353,49 +4354,49 @@ public SQL_GetZoneKeyValues(Handle:owner, Handle:hndl, const String:error[], any
 	CallOnCreatedForAllInGroup(group);
 }
 
-public SQL_LogError(Handle:owner, Handle:hndl, const String:error[], any:data)
+public void SQL_LogError(Database db, DBResultSet results, const char[] error, any data)
 {
-	if (!hndl)
+	if (!results)
 	{
 		LogError("Query failed: %s", error);
 	}
 }
 
-SaveAllZoneGroupsToDatabase()
+void SaveAllZoneGroupsToDatabase()
 {
 	if (!g_hDatabase)
 		return;
 	
-	new group[ZoneGroup];
-	new iSize = GetArraySize(g_hZoneGroups);
-	for(new i=0;i<iSize;i++)
+	int group[ZoneGroup];
+	int iSize = g_hZoneGroups.Length;
+	for(int i=0;i<iSize;i++)
 	{
 		GetGroupByIndex(i, group);
 		SaveZoneGroupToDatabase(group);
 	}
 }
 
-SaveZoneGroupToDatabase(group[ZoneGroup])
+void SaveZoneGroupToDatabase(int group[ZoneGroup])
 {
 	// TODO: Optimize to only update clusters or zones that were changed during this map.
 	// So don't change the database if the server only used the zones.
-	new Transaction:hTransaction = SQL_CreateTransaction();
+	Transaction hTransaction = new Transaction();
 	// Zones and clusters
-	new zoneData[ZoneData], zoneCluster[ZoneCluster];
-	new String:sQuery[2048], String:sEscapedGroupName[MAX_ZONE_GROUP_NAME*2+1], String:sEscapedZoneName[MAX_ZONE_NAME*2+1];
-	new iColor, String:sClusterInsert[512];
+	int zoneData[ZoneData], zoneCluster[ZoneCluster];
+	char sQuery[2048], sEscapedGroupName[MAX_ZONE_GROUP_NAME*2+1], sEscapedZoneName[MAX_ZONE_NAME*2+1], sClusterInsert[512];
+	int iColor;
 	
 	// Custom keyvalues
-	new Handle:hTrieSnapshot;
-	new iNumTrieKeys;
-	new String:sKey[128], String:sValue[256];
-	new String:sEscapedKey[sizeof(sKey)*2+1], String:sEscapedValue[sizeof(sValue)*2+1];
+	StringMapSnapshot hTrieSnapshot;
+	int iNumTrieKeys;
+	char sKey[128], sValue[256];
+	char sEscapedKey[sizeof(sKey)*2+1], sEscapedValue[sizeof(sValue)*2+1];
 	
 	// Insert new clusters first.
-	new String:sClustersToDelete[1024];
-	SQL_EscapeString(g_hDatabase, group[ZG_name], sEscapedGroupName, sizeof(sEscapedGroupName));
-	new iNumClusters = GetArraySize(group[ZG_cluster]);
-	for(new i=0;i<iNumClusters;i++)
+	char sClustersToDelete[1024];
+	g_hDatabase.Escape(group[ZG_name], sEscapedGroupName, sizeof(sEscapedGroupName));
+	int iNumClusters = group[ZG_cluster].Length;
+	for(int i=0;i<iNumClusters;i++)
 	{
 		GetZoneClusterByIndex(i, group, zoneCluster);
 		// That cluster was deleted.
@@ -4413,7 +4414,7 @@ SaveZoneGroupToDatabase(group[ZoneGroup])
 			continue;
 		}
 		
-		SQL_EscapeString(g_hDatabase, zoneCluster[ZC_name], sEscapedZoneName, sizeof(sEscapedZoneName));
+		g_hDatabase.Escape(zoneCluster[ZC_name], sEscapedZoneName, sizeof(sEscapedZoneName));
 		
 		iColor = zoneCluster[ZC_color][0] << 24;
 		iColor |= zoneCluster[ZC_color][1] << 16;
@@ -4434,7 +4435,7 @@ SaveZoneGroupToDatabase(group[ZoneGroup])
 			// This cluster isn't in the database yet, so we need to fetch the id after it got inserted for the custom keyvalues.
 			Format(sClusterInsert, sizeof(sClusterInsert), "(SELECT id FROM `%sclusters` WHERE groupname = '%s' AND map = '%s' AND name = '%s')", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName);
 		}
-		SQL_AddQuery(hTransaction, sQuery);
+		hTransaction.AddQuery(sQuery);
 		
 		// Insert custom key values if there was something set.
 		if (!zoneCluster[ZC_customKVChanged] || !zoneCluster[ZC_customKV])
@@ -4443,29 +4444,29 @@ SaveZoneGroupToDatabase(group[ZoneGroup])
 		// Have to remove all kv first
 		// This is much easier than tracking which key got deleted.
 		Format(sQuery, sizeof(sQuery), "DELETE FROM `%scustom_cluster_keyvalues` WHERE cluster_id = %d", g_sTablePrefix, zoneCluster[ZC_databaseId]);
-		SQL_AddQuery(hTransaction, sQuery);
+		hTransaction.AddQuery(sQuery);
 		
-		hTrieSnapshot = CreateTrieSnapshot(zoneCluster[ZC_customKV]);
-		iNumTrieKeys = TrieSnapshotLength(hTrieSnapshot);
-		for (new k=0; k<iNumTrieKeys; k++)
+		hTrieSnapshot = zoneCluster[ZC_customKV].Snapshot();
+		iNumTrieKeys = hTrieSnapshot.Length;
+		for (int k=0; k<iNumTrieKeys; k++)
 		{
-			GetTrieSnapshotKey(hTrieSnapshot, k, sKey, sizeof(sKey));
-			GetTrieString(zoneCluster[ZC_customKV], sKey, sValue, sizeof(sValue));
-			SQL_EscapeString(g_hDatabase, sKey, sEscapedKey, sizeof(sEscapedKey));
-			SQL_EscapeString(g_hDatabase, sValue, sEscapedValue, sizeof(sEscapedValue));
+			hTrieSnapshot.GetKey(k, sKey, sizeof(sKey));
+			zoneCluster[ZC_customKV].GetString(sKey, sValue, sizeof(sValue));
+			g_hDatabase.Escape(sKey, sEscapedKey, sizeof(sEscapedKey));
+			g_hDatabase.Escape(sValue, sEscapedValue, sizeof(sEscapedValue));
 			Format(sQuery, sizeof(sQuery), "INSERT INTO `%scustom_cluster_keyvalues` (cluster_id, setting, val) VALUES (%s, '%s', '%s')", g_sTablePrefix, sClusterInsert, sEscapedKey, sEscapedValue);
-			SQL_AddQuery(hTransaction, sQuery);
+			hTransaction.AddQuery(sQuery);
 		}
-		CloseHandle(hTrieSnapshot);
+		delete hTrieSnapshot;
 	}
 	// Update all clusters at once.
-	SQL_ExecuteTransaction(g_hDatabase, hTransaction, SQLTxn_InsertSuccess, SQLTxn_InsertClusterFailure);
+	g_hDatabase.Execute(hTransaction, SQLTxn_InsertSuccess, SQLTxn_InsertClusterFailure);
 	
 	// Update all zones now.
-	hTransaction = SQL_CreateTransaction();
-	new iNumZones = GetArraySize(group[ZG_zones]);
-	new String:sZoneInsert[512];
-	for (new i=0; i<iNumZones; i++)
+	hTransaction = new Transaction();
+	int iNumZones = group[ZG_zones].Length;
+	char sZoneInsert[512];
+	for (int i=0; i<iNumZones; i++)
 	{
 		GetZoneByIndex(i, group, zoneData);
 		// This zone is history.
@@ -4477,7 +4478,7 @@ SaveZoneGroupToDatabase(group[ZoneGroup])
 				continue;
 			
 			Format(sQuery, sizeof(sQuery), "DELETE FROM `%szones` WHERE id = %d", g_sTablePrefix, zoneData[ZD_databaseId]);
-			SQL_AddQuery(hTransaction, sQuery);
+			hTransaction.AddQuery(sQuery);
 			continue;
 		}
 		
@@ -4490,7 +4491,7 @@ SaveZoneGroupToDatabase(group[ZoneGroup])
 			if (zoneCluster[ZC_databaseId] <= 0)
 			{
 				// Find the previously inserted cluster id.
-				SQL_EscapeString(g_hDatabase, zoneCluster[ZC_name], sEscapedZoneName, sizeof(sEscapedZoneName));
+				g_hDatabase.Escape(zoneCluster[ZC_name], sEscapedZoneName, sizeof(sEscapedZoneName));
 				Format(sClusterInsert, sizeof(sClusterInsert), "(SELECT id FROM `%sclusters` WHERE groupname = '%s' AND map = '%s' AND name = '%s')", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName);
 			}
 			else
@@ -4510,7 +4511,7 @@ SaveZoneGroupToDatabase(group[ZoneGroup])
 		iColor |= zoneData[ZD_color][2] << 8;
 		iColor |= zoneData[ZD_color][3];
 		
-		SQL_EscapeString(g_hDatabase, zoneData[ZD_name], sEscapedZoneName, sizeof(sEscapedZoneName));
+		g_hDatabase.Escape(zoneData[ZD_name], sEscapedZoneName, sizeof(sEscapedZoneName));
 		
 		// Update or insert the zone.
 		if (zoneData[ZD_databaseId] <= 0)
@@ -4526,7 +4527,7 @@ SaveZoneGroupToDatabase(group[ZoneGroup])
 			
 			Format(sZoneInsert, sizeof(sZoneInsert), "%d", zoneData[ZD_databaseId]);
 		}
-		SQL_AddQuery(hTransaction, sQuery);
+		hTransaction.AddQuery(sQuery);
 		
 		// Insert custom key values if there was something set.
 		if (!zoneData[ZD_customKVChanged] || !zoneData[ZD_customKV])
@@ -4536,42 +4537,42 @@ SaveZoneGroupToDatabase(group[ZoneGroup])
 		// This is much easier than tracking which key got deleted.
 		// TODO: Optimize to only update changed ones.
 		Format(sQuery, sizeof(sQuery), "DELETE FROM `%scustom_zone_keyvalues` WHERE zone_id = %d", g_sTablePrefix, zoneData[ZD_databaseId]);
-		SQL_AddQuery(hTransaction, sQuery);
+		hTransaction.AddQuery(sQuery);
 		
-		hTrieSnapshot = CreateTrieSnapshot(zoneData[ZD_customKV]);
-		iNumTrieKeys = TrieSnapshotLength(hTrieSnapshot);
-		for (new k=0; k<iNumTrieKeys; k++)
+		hTrieSnapshot = zoneData[ZD_customKV].Snapshot();
+		iNumTrieKeys = hTrieSnapshot.Length;
+		for (int k=0; k<iNumTrieKeys; k++)
 		{
-			GetTrieSnapshotKey(hTrieSnapshot, k, sKey, sizeof(sKey));
-			GetTrieString(zoneData[ZD_customKV], sKey, sValue, sizeof(sValue));
-			SQL_EscapeString(g_hDatabase, sKey, sEscapedKey, sizeof(sEscapedKey));
-			SQL_EscapeString(g_hDatabase, sValue, sEscapedValue, sizeof(sEscapedValue));
+			hTrieSnapshot.GetKey(k, sKey, sizeof(sKey));
+			zoneData[ZD_customKV].GetString(sKey, sValue, sizeof(sValue));
+			g_hDatabase.Escape(sKey, sEscapedKey, sizeof(sEscapedKey));
+			g_hDatabase.Escape(sValue, sEscapedValue, sizeof(sEscapedValue));
 			Format(sQuery, sizeof(sQuery), "INSERT INTO `%scustom_zone_keyvalues` (zone_id, setting, val) VALUES (%s, '%s', '%s')", g_sTablePrefix, sZoneInsert, sEscapedKey, sEscapedValue);
-			SQL_AddQuery(hTransaction, sQuery);
+			hTransaction.AddQuery(sQuery);
 		}
-		CloseHandle(hTrieSnapshot);
+		delete hTrieSnapshot;
 	}
 	
 	// Delete all deleted clusters now.
 	if (sClustersToDelete[0])
 	{
 		Format(sQuery, sizeof(sQuery), "DELETE FROM `%sclusters` WHERE id IN(%s)", g_sTablePrefix, sClustersToDelete);
-		SQL_AddQuery(hTransaction, sQuery);
+		hTransaction.AddQuery(sQuery);
 	}
 	
-	SQL_ExecuteTransaction(g_hDatabase, hTransaction, SQLTxn_InsertSuccess, SQLTxn_InsertZonesFailure);
+	g_hDatabase.Execute(hTransaction, SQLTxn_InsertSuccess, SQLTxn_InsertZonesFailure);
 }
 
-public SQLTxn_InsertSuccess(Handle:db, any:data, numQueries, Handle:results[], any:queryData[])
+public void SQLTxn_InsertSuccess(Database db, any data, int numQueries, Handle[] results, any[] queryData)
 {
 }
 
-public SQLTxn_InsertClusterFailure(Handle:db, any:data, numQueries, const String:error[], failIndex, any:queryData[])
+public void SQLTxn_InsertClusterFailure(Database db, any data, int numQueries, const char[] error, int failIndex, any[] queryData)
 {
 	LogError("Error saving clusters on map (%d/%d). Error: %s", failIndex, numQueries, error);
 }
 
-public SQLTxn_InsertZonesFailure(Handle:db, any:data, numQueries, const String:error[], failIndex, any:queryData[])
+public void SQLTxn_InsertZonesFailure(Database db, any data, int numQueries, const char[] error, int failIndex, any[] queryData)
 {
 	LogError("Error saving zones on map (%d/%d). Error: %s", failIndex, numQueries, error);
 }
@@ -4579,28 +4580,28 @@ public SQLTxn_InsertZonesFailure(Handle:db, any:data, numQueries, const String:e
 /**
  * Zone trigger handling
  */
-SetupGroupZones(group[ZoneGroup])
+void SetupGroupZones(int group[ZoneGroup])
 {
-	new iSize = GetArraySize(group[ZG_zones]);
-	new zoneData[ZoneData];
-	for(new i=0;i<iSize;i++)
+	int iSize = group[ZG_zones].Length;
+	int zoneData[ZoneData];
+	for(int i=0;i<iSize;i++)
 	{
 		GetZoneByIndex(i, group, zoneData);
 		SetupZone(group, zoneData);
 	}
 }
 
-bool:SetupZone(group[ZoneGroup], zoneData[ZoneData])
+bool SetupZone(int group[ZoneGroup], int zoneData[ZoneData])
 {
 	// Refuse to create a trigger for a soft-deleted zone.
 	if(zoneData[ZD_deleted])
 		return false;
 
-	new iTrigger = CreateEntityByName("trigger_multiple");
+	int iTrigger = CreateEntityByName("trigger_multiple");
 	if(iTrigger == INVALID_ENT_REFERENCE)
 		return false;
 	
-	decl String:sTargetName[64];
+	char sTargetName[64];
 	Format(sTargetName, sizeof(sTargetName), "mapzonelib_%d_%d", group[ZG_index], zoneData[ZD_index]);
 	DispatchKeyValue(iTrigger, "targetname", sTargetName);
 	
@@ -4610,9 +4611,9 @@ bool:SetupZone(group[ZoneGroup], zoneData[ZoneData])
 	// Make sure any old trigger is gone.
 	RemoveZoneTrigger(group, zoneData);
 	
-	new Float:fRotation[3];
+	float fRotation[3];
 	Array_Copy(zoneData[ZD_rotation], fRotation, 3);
-	new bool:bIsRotated = !Math_VectorsEqual(fRotation, Float:{0.0,0.0,0.0});
+	bool bIsRotated = !Math_VectorsEqual(fRotation, view_as<float>({0.0,0.0,0.0}));
 	
 	// Get "model" of one of the present brushes in the map.
 	// Only those models (and the map .bsp itself) are accepted as brush models.
@@ -4645,7 +4646,7 @@ bool:SetupZone(group[ZoneGroup], zoneData[ZoneData])
 	ApplyNewTriggerBounds(zoneData);
 	
 	// Add the EF_NODRAW flag to keep the engine from trying to render the trigger.
-	new iEffects = GetEntProp(iTrigger, Prop_Send, "m_fEffects");
+	int iEffects = GetEntProp(iTrigger, Prop_Send, "m_fEffects");
 	iEffects |= 32;
 	SetEntProp(iTrigger, Prop_Send, "m_fEffects", iEffects);
 
@@ -4656,18 +4657,18 @@ bool:SetupZone(group[ZoneGroup], zoneData[ZoneData])
 	return true;
 }
 
-ApplyNewTriggerBounds(zoneData[ZoneData])
+void ApplyNewTriggerBounds(int zoneData[ZoneData])
 {
-	new iTrigger = EntRefToEntIndex(zoneData[ZD_triggerEntity]);
+	int iTrigger = EntRefToEntIndex(zoneData[ZD_triggerEntity]);
 	if(iTrigger == INVALID_ENT_REFERENCE)
 		return;
 	
-	new Float:fPos[3], Float:fAngles[3];
+	float fPos[3], fAngles[3];
 	Array_Copy(zoneData[ZD_position], fPos, 3);
 	Array_Copy(zoneData[ZD_rotation], fAngles, 3);
 	TeleportEntity(iTrigger, fPos, fAngles, NULL_VECTOR);
 
-	new Float:fMins[3], Float:fMaxs[3];
+	float fMins[3], fMaxs[3];
 	Array_Copy(zoneData[ZD_mins], fMins, 3);
 	Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
 	Entity_SetMinMaxSize(iTrigger, fMins, fMaxs);
@@ -4676,20 +4677,20 @@ ApplyNewTriggerBounds(zoneData[ZoneData])
 	AcceptEntityInput(iTrigger, "Enable");
 }
 
-bool:ApplyTeamRestrictionFilter(group[ZoneGroup], zoneData[ZoneData])
+bool ApplyTeamRestrictionFilter(int group[ZoneGroup], int zoneData[ZoneData])
 {
-	new iTrigger = EntRefToEntIndex(zoneData[ZD_triggerEntity]);
+	int iTrigger = EntRefToEntIndex(zoneData[ZD_triggerEntity]);
 	if(iTrigger == INVALID_ENT_REFERENCE)
 		return false;
 	
 	// See if that zone is restricted to one team.
 	if(zoneData[ZD_teamFilter] >= 2 && zoneData[ZD_teamFilter] <= 3)
 	{
-		new String:sTargetName[64];
+		char sTargetName[64];
 		Format(sTargetName, sizeof(sTargetName), "mapzone_filter_team%d", zoneData[ZD_teamFilter]);
 		if(group[ZG_filterEntTeam][zoneData[ZD_teamFilter]-2] == INVALID_ENT_REFERENCE || EntRefToEntIndex(group[ZG_filterEntTeam][zoneData[ZD_teamFilter]-2]) == INVALID_ENT_REFERENCE)
 		{
-			new iFilter = CreateEntityByName("filter_activator_team");
+			int iFilter = CreateEntityByName("filter_activator_team");
 			if(iFilter == INVALID_ENT_REFERENCE)
 			{
 				LogError("Can't create filter_activator_team trigger filter entity. Won't create zone %s", zoneData[ZD_name]);
@@ -4720,14 +4721,14 @@ bool:ApplyTeamRestrictionFilter(group[ZoneGroup], zoneData[ZoneData])
 	return false;
 }
 
-FindSmallestExistingEncapsulatingTrigger(zoneData[ZoneData])
+int FindSmallestExistingEncapsulatingTrigger(int zoneData[ZoneData])
 {
 	// Already found a model. Just use it.
 	if(zoneData[ZD_triggerModel][0] != 0)
 		return;
 
-	new Float:vMins[3], Float:vMaxs[3];
-	new Float:fLength, Float:vDiag[3];
+	float vMins[3], vMaxs[3];
+	float fLength, vDiag[3];
 	GetEntPropVector(0, Prop_Data, "m_WorldMins", vMins);
 	GetEntPropVector(0, Prop_Data, "m_WorldMaxs", vMaxs);
 	
@@ -4737,14 +4738,14 @@ FindSmallestExistingEncapsulatingTrigger(zoneData[ZoneData])
 	//LogMessage("World mins [%f,%f,%f] maxs [%f,%f,%f] diag length %f", XYZ(vMins), XYZ(vMaxs), fLength);
 	
 	// The map itself would be always large enough - but often it's way too large!
-	new Float:fSmallestLength = fLength;
+	float fSmallestLength = fLength;
 	GetCurrentMap(zoneData[ZD_triggerModel], sizeof(zoneData[ZD_triggerModel]));
 	Format(zoneData[ZD_triggerModel], sizeof(zoneData[ZD_triggerModel]), "maps/%s.bsp", zoneData[ZD_triggerModel]);
 
-	new iMaxEnts = GetEntityCount();
-	new String:sModel[256], String:sClassname[256], String:sName[64];
-	new bool:bLargeEnough;
-	for(new i=MaxClients+1;i<iMaxEnts;i++)
+	int iMaxEnts = GetEntityCount();
+	char sModel[256], sClassname[256], sName[64];
+	bool bLargeEnough;
+	for(int i=MaxClients+1;i<iMaxEnts;i++)
 	{
 		if(!IsValidEntity(i))
 			continue;
@@ -4771,7 +4772,7 @@ FindSmallestExistingEncapsulatingTrigger(zoneData[ZoneData])
 		fLength = GetVectorLength(vDiag);
 		
 		bLargeEnough = true;
-		for(new v=0;v<3;v++)
+		for(int v=0;v<3;v++)
 		{
 			if(vMins[v] > zoneData[ZD_mins][v]
 			|| vMaxs[v] < zoneData[ZD_maxs][v])
@@ -4792,25 +4793,25 @@ FindSmallestExistingEncapsulatingTrigger(zoneData[ZoneData])
 	//LogMessage("Smallest entity which encapsulates zone %s is %s with diagonal length %f.", zoneData[ZD_name], zoneData[ZD_triggerModel], fSmallestLength);
 }
 
-SetupAllGroupZones()
+void SetupAllGroupZones()
 {
-	new group[ZoneGroup];
-	new iSize = GetArraySize(g_hZoneGroups);
-	for(new i=0;i<iSize;i++)
+	int group[ZoneGroup];
+	int iSize = g_hZoneGroups.Length;
+	for(int i=0;i<iSize;i++)
 	{
 		GetGroupByIndex(i, group);
 		SetupGroupZones(group);
 	}
 }
 
-RemoveZoneTrigger(group[ZoneGroup], zoneData[ZoneData])
+void RemoveZoneTrigger(int group[ZoneGroup], int zoneData[ZoneData])
 {
-	new iTrigger = EntRefToEntIndex(zoneData[ZD_triggerEntity]);
+	int iTrigger = EntRefToEntIndex(zoneData[ZD_triggerEntity]);
 	if(iTrigger == INVALID_ENT_REFERENCE)
 		return;
 	
 	// Fire leave callback for all touching clients.
-	for(new i=1;i<=MaxClients;i++)
+	for(int i=1;i<=MaxClients;i++)
 	{
 		if(!IsClientInGame(i))
 			continue;
@@ -4831,65 +4832,65 @@ RemoveZoneTrigger(group[ZoneGroup], zoneData[ZoneData])
 /**
  * Zone helpers / accessors
  */
-ClearZonesInGroups()
+void ClearZonesInGroups()
 {
-	new group[ZoneGroup];
-	new iSize = GetArraySize(g_hZoneGroups);
-	for(new i=0;i<iSize;i++)
+	int group[ZoneGroup];
+	int iSize = g_hZoneGroups.Length;
+	for(int i=0;i<iSize;i++)
 	{
 		GetGroupByIndex(i, group);
 		ClearZonesinGroup(group);
 	}
 }
 
-ClearZonesinGroup(group[ZoneGroup])
+void ClearZonesinGroup(int group[ZoneGroup])
 {
 	CloseCustomKVInZones(group);
-	ClearArray(group[ZG_zones]);
+	group[ZG_zones].Clear();
 	
 	CloseCustomKVInClusters(group);
-	ClearArray(group[ZG_cluster]);
+	group[ZG_cluster].Clear();
 }
 
-CloseCustomKVInZones(group[ZoneGroup])
+void CloseCustomKVInZones(int group[ZoneGroup])
 {
-	new zoneData[ZoneData];
-	new iSize = GetArraySize(group[ZG_zones]);
-	for(new i=0;i<iSize;i++)
+	int zoneData[ZoneData];
+	int iSize = group[ZG_zones].Length;
+	for(int i=0;i<iSize;i++)
 	{
 		GetZoneByIndex(i, group, zoneData);
 		
 		if (!zoneData[ZD_customKV])
 			continue;
 		
-		CloseHandle(zoneData[ZD_customKV]);
+		delete zoneData[ZD_customKV];
 	}
 }
 
-CloseCustomKVInClusters(group[ZoneGroup])
+void CloseCustomKVInClusters(int group[ZoneGroup])
 {
-	new zoneCluster[ZoneCluster];
-	new iSize = GetArraySize(group[ZG_cluster]);
-	for(new i=0;i<iSize;i++)
+	int zoneCluster[ZoneCluster];
+	int iSize = group[ZG_cluster].Length;
+	for(int i=0;i<iSize;i++)
 	{
 		GetZoneClusterByIndex(i, group, zoneCluster);
 		
 		if (!zoneCluster[ZC_customKV])
 			continue;
 		
-		CloseHandle(zoneCluster[ZC_customKV]);
+		delete zoneCluster[ZC_customKV];
 	}
 }
 
-GetGroupByIndex(iIndex, group[ZoneGroup])
+void GetGroupByIndex(int iIndex, int group[ZoneGroup])
 {
-	GetArrayArray(g_hZoneGroups, iIndex, group[0], _:ZoneGroup);
+	g_hZoneGroups.GetArray(iIndex, group[0], view_as<int>(ZoneGroup));
 }
 
-bool:GetGroupByName(const String:sName[], group[ZoneGroup])
+bool GetGroupByName(const char[] sName, int group[ZoneGroup])
 {
-	new iSize = GetArraySize(g_hZoneGroups);
-	for(new i=0;i<iSize;i++)
+	int iSize = g_hZoneGroups.Length;
+	for(int i=0;i<iSize;i++)
 	{
 		GetGroupByIndex(i, group);
 		if(StrEqual(group[ZG_name], sName, false))
@@ -4898,20 +4899,20 @@ bool:GetGroupByName(const String:sName[], group[ZoneGroup])
 	return false;
 }
 
-SaveGroup(group[ZoneGroup])
+void SaveGroup(int group[ZoneGroup])
 {
-	SetArrayArray(g_hZoneGroups, group[ZG_index], group[0], _:ZoneGroup);
+	g_hZoneGroups.SetArray(group[ZG_index], group[0], view_as<int>(ZoneGroup));
 }
 
-GetZoneByIndex(iIndex, group[ZoneGroup], zoneData[ZoneData])
+void GetZoneByIndex(int iIndex, int group[ZoneGroup], int zoneData[ZoneData])
 {
-	GetArrayArray(group[ZG_zones], iIndex, zoneData[0], _:ZoneData);
+	group[ZG_zones].GetArray(iIndex, zoneData[0], view_as<int>(ZoneData));
 }
 
-bool:GetZoneByName(const String:sName[], group[ZoneGroup], zoneData[ZoneData])
+bool GetZoneByName(const char[] sName, int group[ZoneGroup], int zoneData[ZoneData])
 {
-	new iSize = GetArraySize(group[ZG_zones]);
-	for(new i=0;i<iSize;i++)
+	int iSize = group[ZG_zones].Length;
+	for(int i=0;i<iSize;i++)
 	{
 		GetZoneByIndex(i, group, zoneData);
 		if(zoneData[ZD_deleted])
@@ -4923,26 +4924,26 @@ bool:GetZoneByName(const String:sName[], group[ZoneGroup], zoneData[ZoneData])
 	return false;
 }
 
-SaveZone(group[ZoneGroup], zoneData[ZoneData])
+void SaveZone(int group[ZoneGroup], int zoneData[ZoneData])
 {
-	SetArrayArray(group[ZG_zones], zoneData[ZD_index], zoneData[0], _:ZoneData);
+	group[ZG_zones].SetArray(zoneData[ZD_index], zoneData[0], view_as<int>(ZoneData));
 }
 
-bool:ZoneExistsWithName(group[ZoneGroup], const String:sZoneName[])
+bool ZoneExistsWithName(int group[ZoneGroup], const char[] sZoneName)
 {
-	new zoneData[ZoneData];
+	int zoneData[ZoneData];
 	return GetZoneByName(sZoneName, group, zoneData);
 }
 
-GetZoneClusterByIndex(iIndex, group[ZoneGroup], zoneCluster[ZoneCluster])
+void GetZoneClusterByIndex(int iIndex, int group[ZoneGroup], int zoneCluster[ZoneCluster])
 {
-	GetArrayArray(group[ZG_cluster], iIndex, zoneCluster[0], _:ZoneCluster);
+	group[ZG_cluster].GetArray(iIndex, zoneCluster[0], view_as<int>(ZoneCluster));
 }
 
-bool:GetZoneClusterByName(const String:sName[], group[ZoneGroup], zoneCluster[ZoneCluster])
+bool GetZoneClusterByName(const char[] sName, int group[ZoneGroup], int zoneCluster[ZoneCluster])
 {
-	new iSize = GetArraySize(group[ZG_cluster]);
-	for(new i=0;i<iSize;i++)
+	int iSize = group[ZG_cluster].Length;
+	for(int i=0;i<iSize;i++)
 	{
 		GetZoneClusterByIndex(i, group, zoneCluster);
 		if(zoneCluster[ZC_deleted])
@@ -4954,26 +4955,26 @@ bool:GetZoneClusterByName(const String:sName[], group[ZoneGroup], zoneCluster[Zo
 	return false;
 }
 
-SaveCluster(group[ZoneGroup], zoneCluster[ZoneCluster])
+void SaveCluster(int group[ZoneGroup], int zoneCluster[ZoneCluster])
 {
-	SetArrayArray(group[ZG_cluster], zoneCluster[ZC_index], zoneCluster[0], _:ZoneCluster);
+	group[ZG_cluster].SetArray(zoneCluster[ZC_index], zoneCluster[0], view_as<int>(ZoneCluster));
 }
 
-bool:ClusterExistsWithName(group[ZoneGroup], const String:sClusterName[])
+bool ClusterExistsWithName(int group[ZoneGroup], const char[] sClusterName)
 {
-	new zoneCluster[ZoneCluster];
+	int zoneCluster[ZoneCluster];
 	return GetZoneClusterByName(sClusterName, group, zoneCluster);
 }
 
-RemoveClientFromAllZones(client)
+void RemoveClientFromAllZones(int client)
 {
-	new iNumGroups = GetArraySize(g_hZoneGroups);
-	new iNumZones, group[ZoneGroup], zoneData[ZoneData];
-	for(new i=0;i<iNumGroups;i++)
+	int iNumGroups = g_hZoneGroups.Length;
+	int iNumZones, group[ZoneGroup], zoneData[ZoneData];
+	for(int i=0;i<iNumGroups;i++)
 	{
 		GetGroupByIndex(i, group);
-		iNumZones = GetArraySize(group[ZG_zones]);
-		for(new z=0;z<iNumZones;z++)
+		iNumZones = group[ZG_zones].Length;
+		for(int z=0;z<iNumZones;z++)
 		{
 			GetZoneByIndex(z, group, zoneData);
 			if(zoneData[ZD_deleted])
@@ -4999,12 +5000,12 @@ RemoveClientFromAllZones(client)
 	}
 }
 
-CallOnCreatedForAllInGroup(group[ZoneGroup])
+void CallOnCreatedForAllInGroup(int group[ZoneGroup])
 {
 	// Inform other plugins that these clusters are there now.
-	new iSize = GetArraySize(group[ZG_cluster]);
-	new zoneCluster[ZoneCluster];
-	for (new i=0; i<iSize; i++)
+	int iSize = group[ZG_cluster].Length;
+	int zoneCluster[ZoneCluster];
+	for (int i=0; i<iSize; i++)
 	{
 		GetZoneClusterByIndex(i, group, zoneCluster);
 		if (zoneCluster[ZC_deleted])
@@ -5014,9 +5015,9 @@ CallOnCreatedForAllInGroup(group[ZoneGroup])
 	}
 	
 	// And all these zones too.
-	iSize = GetArraySize(group[ZG_zones]);
-	new zoneData[ZoneData];
-	for (new i=0; i<iSize; i++)
+	iSize = group[ZG_zones].Length;
+	int zoneData[ZoneData];
+	for (int i=0; i<iSize; i++)
 	{
 		GetZoneByIndex(i, group, zoneData);
 		if (zoneData[ZD_deleted])
@@ -5036,7 +5037,7 @@ CallOnCreatedForAllInGroup(group[ZoneGroup])
 }
 
 // The creator defaults to 0 if the zone has been loaded from the config or database.
-CallOnZoneCreated(group[ZoneGroup], zoneData[ZoneData], iCreator=0)
+void CallOnZoneCreated(int group[ZoneGroup], int zoneData[ZoneData], int iCreator=0)
 {
 	Call_StartForward(g_hfwdOnCreatedForward);
 	Call_PushString(group[ZG_name]);
@@ -5047,7 +5048,7 @@ CallOnZoneCreated(group[ZoneGroup], zoneData[ZoneData], iCreator=0)
 }
 
 // The creator defaults to 0 if the zone has been loaded from the config or database.
-CallOnClusterCreated(group[ZoneGroup], zoneCluster[ZoneCluster], iCreator=0)
+void CallOnClusterCreated(int group[ZoneGroup], int zoneCluster[ZoneCluster], int iCreator=0)
 {
 	Call_StartForward(g_hfwdOnCreatedForward);
 	Call_PushString(group[ZG_name]);
@@ -5057,7 +5058,7 @@ CallOnClusterCreated(group[ZoneGroup], zoneCluster[ZoneCluster], iCreator=0)
 	Call_Finish();
 }
 
-CallOnZoneRemoved(group[ZoneGroup], zoneData[ZoneData], iDeleter)
+void CallOnZoneRemoved(int group[ZoneGroup], int zoneData[ZoneData], int iDeleter)
 {
 	Call_StartForward(g_hfwdOnRemovedForward);
 	Call_PushString(group[ZG_name]);
@@ -5067,7 +5068,7 @@ CallOnZoneRemoved(group[ZoneGroup], zoneData[ZoneData], iDeleter)
 	Call_Finish();
 }
 
-CallOnClusterRemoved(group[ZoneGroup], zoneCluster[ZoneCluster], iDeleter)
+void CallOnClusterRemoved(int group[ZoneGroup], int zoneCluster[ZoneCluster], int iDeleter)
 {
 	Call_StartForward(g_hfwdOnRemovedForward);
 	Call_PushString(group[ZG_name]);
@@ -5077,7 +5078,7 @@ CallOnClusterRemoved(group[ZoneGroup], zoneCluster[ZoneCluster], iDeleter)
 	Call_Finish();
 }
 
-CallOnAddedToCluster(group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster], iAdmin)
+void CallOnAddedToCluster(int group[ZoneGroup], int zoneData[ZoneData], int zoneCluster[ZoneCluster], int iAdmin)
 {
 	Call_StartForward(g_hfwdOnAddedToClusterForward);
 	Call_PushString(group[ZG_name]);
@@ -5087,7 +5088,7 @@ CallOnAddedToCluster(group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneClust
 	Call_Finish();
 }
 
-CallOnRemovedFromCluster(group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster], iAdmin)
+void CallOnRemovedFromCluster(int group[ZoneGroup], int zoneData[ZoneData], int zoneCluster[ZoneCluster], int iAdmin)
 {
 	Call_StartForward(g_hfwdOnRemovedFromClusterForward);
 	Call_PushString(group[ZG_name]);
@@ -5100,12 +5101,12 @@ CallOnRemovedFromCluster(group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneC
 /**
  * Zone adding
  */
-bool:IsClientEditingZonePosition(client)
+bool IsClientEditingZonePosition(int client)
 {
 	return g_ClientMenuState[client][CMS_addZone] || g_ClientMenuState[client][CMS_editPosition] || g_ClientMenuState[client][CMS_editCenter];
 }
 
-HandleZonePositionSetting(client, const Float:fOrigin[3])
+void HandleZonePositionSetting(int client, const float fOrigin[3])
 {
 	if(g_ClientMenuState[client][CMS_addZone] || g_ClientMenuState[client][CMS_editPosition])
 	{
@@ -5144,11 +5145,11 @@ HandleZonePositionSetting(client, const Float:fOrigin[3])
 				// Don't clear the menu state when we interrupt the point edit menu.
 				g_ClientMenuState[client][CMS_redrawPointMenu] = true;
 				
-				new group[ZoneGroup];
+				int group[ZoneGroup];
 				GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 				
 				// See if we have a valid name already given.
-				new bool:bPresetName = g_ClientMenuState[client][CMS_presetZoneName][0] != 0;
+				bool bPresetName = g_ClientMenuState[client][CMS_presetZoneName][0] != 0;
 				
 				// There is a name already given for this zone. use it.
 				if (bPresetName
@@ -5184,15 +5185,15 @@ HandleZonePositionSetting(client, const Float:fOrigin[3])
 	}
 }
 
-bool:GetClientZoneAimPosition(client, Float:fTarget[3], Float:fUnsnappedTarget[3])
+bool GetClientZoneAimPosition(int client, float fTarget[3], float fUnsnappedTarget[3])
 {
-	new Float:fClientPosition[3], Float:fClientAngles[3];
+	float fClientPosition[3], fClientAngles[3];
 	GetClientEyePosition(client, fClientPosition);
 	
 	// When a player is currently holding rightclick while editing a zone point position,
 	// he's trying to adjust the maximal distance of the laserpointer point which specifies the target position.
 	// Don't change the pointer position while moving the mouse up and down to change the distance.
-	new bool:bIsAdjustingAimLimit = g_ClientMenuState[client][CMS_previewMode] == ZPM_aim && (g_iClientButtons[client] & IN_ATTACK2 == IN_ATTACK2) && IsClientEditingZonePosition(client);
+	bool bIsAdjustingAimLimit = g_ClientMenuState[client][CMS_previewMode] == ZPM_aim && (g_iClientButtons[client] & IN_ATTACK2 == IN_ATTACK2) && IsClientEditingZonePosition(client);
 	if (bIsAdjustingAimLimit)
 	{
 		fClientAngles = g_fAimCapTempAngles[client];
@@ -5203,12 +5204,12 @@ bool:GetClientZoneAimPosition(client, Float:fTarget[3], Float:fUnsnappedTarget[3
 	}
 	
 	// See what the client is aiming at.
-	new bool:bDidHit;
+	bool bDidHit;
 	TR_TraceRayFilter(fClientPosition, fClientAngles, MASK_SOLID, RayType_Infinite, RayFilter_DontHitSelf, client);
 	bDidHit = TR_DidHit();
 	
 	// See if we need to cap it.
-	new Float:fAimDirection[3], Float:fTargetNormal[3];
+	float fAimDirection[3], fTargetNormal[3];
 	// We did hit something over there.
 	if (bDidHit)
 	{
@@ -5218,7 +5219,7 @@ bool:GetClientZoneAimPosition(client, Float:fTarget[3], Float:fUnsnappedTarget[3
 		NormalizeVector(fTargetNormal, fTargetNormal);
 		
 		// Make sure the normal is facing the player.
-		new Float:fDirectionToPlayer[3];
+		float fDirectionToPlayer[3];
 		MakeVectorFromPoints(fUnsnappedTarget, fClientPosition, fDirectionToPlayer);
 		NormalizeVector(fDirectionToPlayer, fDirectionToPlayer);
 		if(GetVectorDotProduct(fDirectionToPlayer, fTargetNormal) < 0)
@@ -5230,7 +5231,7 @@ bool:GetClientZoneAimPosition(client, Float:fTarget[3], Float:fUnsnappedTarget[3
 		MakeVectorFromPoints(fClientPosition, fTarget, fAimDirection);
 		
 		// Player is aiming at something that's nearer than the current maximal distance?
-		new Float:fDistance = GetVectorLength(fAimDirection);
+		float fDistance = GetVectorLength(fAimDirection);
 		if (fDistance <= g_ClientMenuState[client][CMS_aimCapDistance]
 		// Or is currently adjusting the max distance and never set it before? Start moving the point at the current position.
 		|| (bIsAdjustingAimLimit && g_ClientMenuState[client][CMS_aimCapDistance] < 0.0))
@@ -5261,15 +5262,15 @@ bool:GetClientZoneAimPosition(client, Float:fTarget[3], Float:fUnsnappedTarget[3
 }
 
 // Get ground position and normal for the position the player is standing on.
-bool:GetClientFeetPosition(client, Float:fFeetPosition[3], Float:fGroundNormal[3])
+bool GetClientFeetPosition(int client, float fFeetPosition[3], float fGroundNormal[3])
 {
-	new Float:fOrigin[3];
+	float fOrigin[3];
 	GetClientAbsOrigin(client, fOrigin);
 	fFeetPosition = fOrigin;
 	
 	// Trace directly downwards
 	fOrigin[2] += 16.0;
-	TR_TraceRayFilter(fOrigin, Float:{90.0,0.0,0.0}, MASK_PLAYERSOLID, RayType_Infinite, RayFilter_DontHitPlayers);
+	TR_TraceRayFilter(fOrigin, view_as<float>({90.0,0.0,0.0}), MASK_PLAYERSOLID, RayType_Infinite, RayFilter_DontHitPlayers);
 	if (TR_DidHit())
 	{
 		TR_GetEndPosition(fOrigin);
@@ -5277,7 +5278,7 @@ bool:GetClientFeetPosition(client, Float:fFeetPosition[3], Float:fGroundNormal[3
 		NormalizeVector(fGroundNormal, fGroundNormal);
 		
 		// Make sure the normal is facing the player.
-		new Float:fDirectionToPlayer[3];
+		float fDirectionToPlayer[3];
 		MakeVectorFromPoints(fOrigin, fFeetPosition, fDirectionToPlayer);
 		NormalizeVector(fDirectionToPlayer, fDirectionToPlayer);
 		if(GetVectorDotProduct(fDirectionToPlayer, fGroundNormal) < 0)
@@ -5288,7 +5289,7 @@ bool:GetClientFeetPosition(client, Float:fFeetPosition[3], Float:fGroundNormal[3
 	return false;
 }
 
-SnapToGrid(client, Float:fPoint[3], Float:fSnappedPoint[3], Float:fTargetNormal[3])
+void SnapToGrid(int client, float fPoint[3], float fSnappedPoint[3], float fTargetNormal[3])
 {
 	// User has this disabled.
 	if(!g_ClientMenuState[client][CMS_snapToGrid])
@@ -5297,17 +5298,17 @@ SnapToGrid(client, Float:fPoint[3], Float:fSnappedPoint[3], Float:fTargetNormal[
 		return;
 	}
 		
-	new Float:fStepsize = g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]];
-	for(new i=0; i<3; i++)
+	float fStepsize = g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]];
+	for(int i=0; i<3; i++)
 	{
 		fSnappedPoint[i] = RoundToNearest(fPoint[i] / fStepsize) * fStepsize;
 	}
 	
 	// Snap to walls!
 	// See if the grid snapped behind the target point.
-	if (!Math_VectorsEqual(fTargetNormal, Float:{0.0,0.0,0.0}))
+	if (!Math_VectorsEqual(fTargetNormal, view_as<float>({0.0,0.0,0.0})))
 	{
-		new Float:fSnappedDirection[3];
+		float fSnappedDirection[3];
 		MakeVectorFromPoints(fPoint, fSnappedPoint, fSnappedDirection);
 		NormalizeVector(fSnappedDirection, fSnappedDirection);
 		// The grid point is behind the end position. Bring it forward again.
@@ -5322,12 +5323,12 @@ SnapToGrid(client, Float:fPoint[3], Float:fSnappedPoint[3], Float:fTargetNormal[
 			}
 		}
 		
-		new bool:bChanged;
+		bool bChanged;
 		do
 		{
 			bChanged = false;
 			// See if we're still behind some other wall after moving the point toward the normal again.
-			new Float:fAngles[3];
+			float fAngles[3];
 			MakeVectorFromPoints(fPoint, fSnappedPoint, fSnappedDirection);
 			NormalizeVector(fSnappedDirection, fSnappedDirection);
 			GetVectorAngles(fSnappedDirection, fAngles);
@@ -5336,7 +5337,7 @@ SnapToGrid(client, Float:fPoint[3], Float:fSnappedPoint[3], Float:fTargetNormal[
 			if (!TR_DidHit())
 				return;
 			
-			new Float:fOtherWall[3], Float:fOtherWallDirection[3];
+			float fOtherWall[3], fOtherWallDirection[3];
 			TR_GetEndPosition(fOtherWall);
 			MakeVectorFromPoints(fOtherWall, fSnappedPoint, fOtherWallDirection);
 			NormalizeVector(fOtherWallDirection, fOtherWallDirection);
@@ -5345,7 +5346,7 @@ SnapToGrid(client, Float:fPoint[3], Float:fSnappedPoint[3], Float:fTargetNormal[
 			NormalizeVector(fTargetNormal, fTargetNormal);
 			
 			// Make sure the normal is facing the player.
-			new Float:fDirectionToPlayer[3];
+			float fDirectionToPlayer[3];
 			MakeVectorFromPoints(fOtherWall, fPoint, fDirectionToPlayer);
 			NormalizeVector(fDirectionToPlayer, fDirectionToPlayer);
 			if(GetVectorDotProduct(fDirectionToPlayer, fTargetNormal) < 0)
@@ -5368,18 +5369,18 @@ SnapToGrid(client, Float:fPoint[3], Float:fSnappedPoint[3], Float:fTargetNormal[
 	}
 }
 
-bool:Math_GetLinePlaneIntersection(Float:fLinePoint[3], Float:fLineDirection[3], Float:fPlanePoint[3], Float:fPlaneNormal[3], Float:fCollisionPoint[3])
+bool Math_GetLinePlaneIntersection(float fLinePoint[3], float fLineDirection[3], float fPlanePoint[3], float fPlaneNormal[3], float fCollisionPoint[3])
 {
-	new Float:fCos = GetVectorDotProduct(fLineDirection, fPlaneNormal);
+	float fCos = GetVectorDotProduct(fLineDirection, fPlaneNormal);
 	// Line is parallel to the plane. No single intersection point.
 	if (fCos == 0.0)
 		return false;
 	
-	new Float:fTowardsPlane[3];
+	float fTowardsPlane[3];
 	SubtractVectors(fPlanePoint, fLinePoint, fTowardsPlane);
 	
-	new Float:fDistance = GetVectorDotProduct(fTowardsPlane, fPlaneNormal) / fCos;
-	new Float:fMoveOnLine[3];
+	float fDistance = GetVectorDotProduct(fTowardsPlane, fPlaneNormal) / fCos;
+	float fMoveOnLine[3];
 	fMoveOnLine = fLineDirection;
 	ScaleVector(fMoveOnLine, fDistance);
 	AddVectors(fLinePoint, fMoveOnLine, fCollisionPoint);
@@ -5387,14 +5388,14 @@ bool:Math_GetLinePlaneIntersection(Float:fLinePoint[3], Float:fLineDirection[3],
 }
 
 // Handle the default height of a zone when it's too flat.
-HandleZoneDefaultHeight(&Float:fFirstPointZ, &Float:fSecondPointZ)
+void HandleZoneDefaultHeight(float &fFirstPointZ, float &fSecondPointZ)
 {
-	new Float:fDefaultHeight = GetConVarFloat(g_hCVDefaultHeight);
+	float fDefaultHeight = g_hCVDefaultHeight.FloatValue;
 	if (fDefaultHeight == 0.0)
 		return;
 	
-	new Float:fMinHeight = GetConVarFloat(g_hCVMinHeight);
-	new Float:fZoneHeight = FloatAbs(fFirstPointZ - fSecondPointZ);
+	float fMinHeight = g_hCVMinHeight.FloatValue;
+	float fZoneHeight = FloatAbs(fFirstPointZ - fSecondPointZ);
 	if (fZoneHeight > fMinHeight)
 		return;
 	
@@ -5409,7 +5410,7 @@ HandleZoneDefaultHeight(&Float:fFirstPointZ, &Float:fSecondPointZ)
 	}
 }
 
-StartZoneAdding(client)
+void StartZoneAdding(int client)
 {
 	g_ClientMenuState[client][CMS_addZone] = true;
 	g_ClientMenuState[client][CMS_editState] = ZES_first;
@@ -5417,7 +5418,7 @@ StartZoneAdding(client)
 	PrintToChat(client, "Map Zones > Click on the two points or push \"e\" to set them at your feet, which will specify the two diagonal opposite corners of the zone.");
 }
 
-ResetZoneAddingState(client)
+void ResetZoneAddingState(int client)
 {
 	g_ClientMenuState[client][CMS_addZone] = false;
 	g_ClientMenuState[client][CMS_editState] = ZES_first;
@@ -5427,17 +5428,17 @@ ResetZoneAddingState(client)
 	ClearHandle(g_hShowZoneWhileEditTimer[client]);
 }
 
-SaveNewZone(client, const String:sName[])
+void SaveNewZone(int client, const char[] sName)
 {
 	if(!g_ClientMenuState[client][CMS_addZone])
 		return;
 
-	new group[ZoneGroup], zoneCluster[ZoneCluster];
+	int group[ZoneGroup], zoneCluster[ZoneCluster];
 	GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 	if(g_ClientMenuState[client][CMS_cluster] != -1)
 		GetZoneClusterByIndex(g_ClientMenuState[client][CMS_cluster], group, zoneCluster);
 	
-	new zoneData[ZoneData];
+	int zoneData[ZoneData];
 	strcopy(zoneData[ZD_name], MAX_ZONE_NAME, sName);
 	
 	SaveChangedZoneCoordinates(client, zoneData);
@@ -5455,8 +5456,8 @@ SaveNewZone(client, const String:sName[])
 	// Don't use a seperate color for this zone.
 	zoneData[ZD_color][0] = -1;
 	
-	zoneData[ZD_index] = GetArraySize(group[ZG_zones]);
-	PushArrayArray(group[ZG_zones], zoneData[0], _:ZoneData);
+	zoneData[ZD_index] = group[ZG_zones].Length;
+	group[ZG_zones].PushArray(zoneData[0], view_as<int>(ZoneData));
 	
 	if(zoneData[ZD_clusterIndex] == -1)
 	{
@@ -5491,16 +5492,16 @@ SaveNewZone(client, const String:sName[])
 		DisplayZoneEditMenu(client);
 }
 
-SaveChangedZoneCoordinates(client, zoneData[ZoneData])
+void SaveChangedZoneCoordinates(int client, int zoneData[ZoneData])
 {
-	new Float:fMins[3], Float:fMaxs[3], Float:fPosition[3], Float:fAngles[3];
+	float fMins[3], fMaxs[3], fPosition[3], fAngles[3];
 	Array_Copy(g_ClientMenuState[client][CMS_rotation], fAngles, 3);
 	Array_Copy(g_ClientMenuState[client][CMS_first], fMins, 3);
 	Array_Copy(g_ClientMenuState[client][CMS_second], fMaxs, 3);
 	
-	new Float:fOldMins[3];
+	float fOldMins[3];
 	// Apply the rotation so we find the right middle, if there is rotation already.
-	if(!Math_VectorsEqual(fAngles, Float:{0.0,0.0,0.0}))
+	if(!Math_VectorsEqual(fAngles, view_as<float>({0.0,0.0,0.0})))
 	{
 		Array_Copy(zoneData[ZD_position], fPosition, 3);
 		SubtractVectors(fMins, fPosition, fMins);
@@ -5527,7 +5528,7 @@ SaveChangedZoneCoordinates(client, zoneData[ZoneData])
 	SubtractVectors(fMaxs, fPosition, fMaxs);
 	
 	// Make sure the mins are lower than the maxs.
-	for(new i=0;i<3;i++)
+	for(int i=0;i<3;i++)
 	{
 		if(fMins[i] > 0.0)
 			fMins[i] *= -1.0;
@@ -5542,7 +5543,7 @@ SaveChangedZoneCoordinates(client, zoneData[ZoneData])
 	// We changed the mins/maxs relative to the rotated middle position..
 	// Get the new center position which is the correct center after rotation was applied.
 	// XXX: There might be an easier way?
-	if(!Math_VectorsEqual(fAngles, Float:{0.0,0.0,0.0}))
+	if(!Math_VectorsEqual(fAngles, view_as<float>({0.0,0.0,0.0})))
 	{
 		Math_RotateVector(fMins, fAngles, fMins);
 		AddVectors(fMins, fPosition, fMins);
@@ -5554,28 +5555,28 @@ SaveChangedZoneCoordinates(client, zoneData[ZoneData])
 	Array_Copy(fPosition, zoneData[ZD_position], 3);
 }
 
-GetFreeAutoZoneName(group[ZoneGroup], String:sBuffer[], maxlen)
+void GetFreeAutoZoneName(int group[ZoneGroup], char[] sBuffer, int maxlen)
 {
-	new iIndex = 1;
+	int iIndex = 1;
 	do
 	{
 		Format(sBuffer, maxlen, "Zone %d", iIndex++);
 	} while(ZoneExistsWithName(group, sBuffer));
 }
 
-AddNewCluster(group[ZoneGroup], const String:sClusterName[], zoneCluster[ZoneCluster])
+void AddNewCluster(int group[ZoneGroup], const char[] sClusterName, int zoneCluster[ZoneCluster])
 {
 	strcopy(zoneCluster[ZC_name], MAX_ZONE_NAME, sClusterName);
 	// Don't use a seperate color for this cluster by default.
 	zoneCluster[ZC_color][0] = -1;
-	zoneCluster[ZC_index] = GetArraySize(group[ZG_cluster]);
-	PushArrayArray(group[ZG_cluster], zoneCluster[0], _:ZoneCluster);
+	zoneCluster[ZC_index] = group[ZG_cluster].Length;
+	group[ZG_cluster].PushArray(zoneCluster[0], view_as<int>(ZoneCluster));
 }
 
 /**
  * Clipboard helpers
  */
-ClearClientClipboard(client)
+void ClearClientClipboard(int client)
 {
 	Array_Fill(g_Clipboard[client][CB_mins], 3, 0.0);
 	Array_Fill(g_Clipboard[client][CB_maxs], 3, 0.0);
@@ -5584,7 +5585,7 @@ ClearClientClipboard(client)
 	g_Clipboard[client][CB_name][0] = '\0';
 }
 
-SaveToClipboard(client, zoneData[ZoneData])
+void SaveToClipboard(int client, int zoneData[ZoneData])
 {
 	Array_Copy(zoneData[ZD_mins], g_Clipboard[client][CB_mins], 3);
 	Array_Copy(zoneData[ZD_maxs], g_Clipboard[client][CB_maxs], 3);
@@ -5593,7 +5594,7 @@ SaveToClipboard(client, zoneData[ZoneData])
 	strcopy(g_Clipboard[client][CB_name], MAX_ZONE_NAME, zoneData[ZD_name]);
 }
 
-PasteFromClipboard(client)
+void PasteFromClipboard(int client)
 {
 	// We want to edit the center position directly afterwards
 	g_ClientMenuState[client][CMS_editCenter] = true;
@@ -5602,7 +5603,7 @@ PasteFromClipboard(client)
 	g_ClientMenuState[client][CMS_editState] = ZES_name;
 	
 	// Copy the details to the client state.
-	for(new i=0;i<3;i++)
+	for(int i=0;i<3;i++)
 	{
 		g_ClientMenuState[client][CMS_first][i] = g_Clipboard[client][CB_position][i] + g_Clipboard[client][CB_mins][i];
 		g_ClientMenuState[client][CMS_second][i] = g_Clipboard[client][CB_position][i] + g_Clipboard[client][CB_maxs][i];
@@ -5614,7 +5615,7 @@ PasteFromClipboard(client)
 	DisplayZoneAddFinalizationMenu(client);
 }
 
-bool:HasZoneInClipboard(client)
+bool HasZoneInClipboard(int client)
 {
 	return g_Clipboard[client][CB_name][0] != '\0';
 }
@@ -5622,9 +5623,9 @@ bool:HasZoneInClipboard(client)
 /**
  * Generic helpers
  */
-bool:ExtractIndicesFromString(const String:sTargetName[], &iGroupIndex, &iZoneIndex)
+bool ExtractIndicesFromString(const char[] sTargetName, int &iGroupIndex, int &iZoneIndex)
 {
-	new String:sBuffer[64];
+	char sBuffer[64];
 	strcopy(sBuffer, sizeof(sBuffer), sTargetName);
 
 	// Has to start with "mapzonelib_"
@@ -5633,10 +5634,10 @@ bool:ExtractIndicesFromString(const String:sTargetName[], &iGroupIndex, &iZoneIn
 	
 	ReplaceString(sBuffer, sizeof(sBuffer), "mapzonelib_", "");
 	
-	new iLen = strlen(sBuffer);
+	int iLen = strlen(sBuffer);
 	
 	// Extract the group and zone indicies from the targetname.
-	new iUnderscorePos = FindCharInString(sBuffer, '_');
+	int iUnderscorePos = FindCharInString(sBuffer, '_');
 	
 	// Zone index missing?
 	if(iUnderscorePos+1 >= iLen)
@@ -5648,9 +5649,9 @@ bool:ExtractIndicesFromString(const String:sTargetName[], &iGroupIndex, &iZoneIn
 	return true;
 }
 
-Vector_GetMiddleBetweenPoints(const Float:vec1[3], const Float:vec2[3], Float:result[3])
+void Vector_GetMiddleBetweenPoints(const float vec1[3], const float vec2[3], float result[3])
 {
-	new Float:mid[3];
+	float mid[3];
 	MakeVectorFromPoints(vec1, vec2, mid);
 	mid[0] = mid[0] / 2.0;
 	mid[1] = mid[1] / 2.0;
@@ -5658,12 +5659,12 @@ Vector_GetMiddleBetweenPoints(const Float:vec1[3], const Float:vec2[3], Float:re
 	AddVectors(vec1, mid, result);
 }
 
-public bool:RayFilter_DontHitSelf(entity, contentsMask, any:data)
+public bool RayFilter_DontHitSelf(int entity, int contentsMask, any data)
 {
 	return entity != data;
 }
 
-public bool:RayFilter_DontHitPlayers(entity, contentsMask, any:data)
+public bool RayFilter_DontHitPlayers(int entity, int contentsMask, any data)
 {
 	return entity < 1 && entity > MaxClients;
 }
