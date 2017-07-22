@@ -107,6 +107,7 @@ ConVar g_hCVDebugBeamDistance;
 ConVar g_hCVMinHeight;
 ConVar g_hCVDefaultHeight;
 ConVar g_hCVDefaultSnapToGrid;
+ConVar g_hCVPlayerCenterCollision;
 
 ConVar g_hCVDatabaseConfig;
 ConVar g_hCVTablePrefix;
@@ -205,13 +206,15 @@ public void OnPluginStart()
 	g_hCVDebugBeamDistance = CreateConVar("sm_mapzone_debug_beamdistance", "5000", "Only show zones that are as close as up to x units to the player.", _, true, 0.0);
 	g_hCVMinHeight = CreateConVar("sm_mapzone_minheight", "10", "Snap to the default_height if zone is below this height.", _, true, 0.0);
 	g_hCVDefaultHeight = CreateConVar("sm_mapzone_default_height", "128", "The default height of a zone when it's below the minimum height. 0 to disable.", _, true, 0.0);
-	g_hCVDefaultSnapToGrid = CreateConVar("sm_mapzone_default_snaptogrid_enabled", "0", "Enable Snap to map grid by default?", _, true, 0.0, true, 1.0);
+	g_hCVDefaultSnapToGrid = CreateConVar("sm_mapzone_default_snaptogrid_enabled", "0", "Enable snapping to map grid by default?", _, true, 0.0, true, 1.0);
+	g_hCVPlayerCenterCollision = CreateConVar("sm_mapzone_player_center_trigger", "0", "Shrink the zone trigger by half the size of a player model to make it look like the center of the player has to be in a zone to make him register as being in it?", _, true, 0.0, true, 1.0);
 	g_hCVDatabaseConfig = CreateConVar("sm_mapzone_database_config", "", "The database section in databases.cfg to connect to. Optionally save and load zones from that database. Only used when this option is set. Will still save the zones to local files too as backup if database is unavailable.");
 	g_hCVTablePrefix = CreateConVar("sm_mapzone_database_prefix", "zones_", "Optional prefix of the database tables. e.g. \"zone_\"");
 	
 	AutoExecConfig(true, "plugin.mapzonelib");
 	
 	g_hCVShowZonesDefault.AddChangeHook(ConVar_OnDebugChanged);
+	g_hCVPlayerCenterCollision.AddChangeHook(ConVar_OnPlayerCenterCollisionChanged);
 	
 	HookEvent("round_start", Event_OnRoundStart);
 	HookEvent("player_spawn", Event_OnPlayerSpawn);
@@ -734,6 +737,26 @@ public void ConVar_OnDebugChanged(ConVar convar, const char[] oldValue, const ch
 	// Show all zones immediately!
 	if(bShowZones)
 		TriggerTimer(g_hShowZonesTimer, true);
+}
+
+public void ConVar_OnPlayerCenterCollisionChanged(ConVar convar, const char[] oldValue, const char[] newValue)
+{
+	// Update all triggers with the changed bounds reduction right away.
+	int iNumGroups = g_hZoneGroups.Length;
+	int iNumZones, group[ZoneGroup], zoneData[ZoneData];
+	for(int i=0;i<iNumGroups;i++)
+	{
+		GetGroupByIndex(i, group);
+		iNumZones = group[ZG_zones].Length;
+		for(int z=0;z<iNumZones;z++)
+		{
+			GetZoneByIndex(z, group, zoneData);
+			if(zoneData[ZD_deleted])
+				continue;
+
+			ApplyNewTriggerBounds(zoneData);
+		}
+	}
 }
 
 /**
@@ -4673,6 +4696,24 @@ void ApplyNewTriggerBounds(int zoneData[ZoneData])
 	float fMins[3], fMaxs[3];
 	Array_Copy(zoneData[ZD_mins], fMins, 3);
 	Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
+
+	// The server admin might want to have players being considered in a zone
+	// based on where the center of their body is instead of the outer bounds
+	// of the player model.
+	if(g_hCVPlayerCenterCollision.BoolValue)
+	{
+		static float fReduction[3] = {16.0, 16.0, 36.0};
+		for(int i=0;i<3;i++)
+		{
+			// Make sure the trigger bounds don't cross each other for really small triggers.
+			if((fMins[i]+fReduction[i]) < fMaxs[i])
+				fMins[i] += fReduction[i];
+
+			if((fMaxs[i]-fReduction[i]) > fMins[i])
+				fMaxs[i] -= fReduction[i];
+		}
+	}
+
 	Entity_SetMinMaxSize(iTrigger, fMins, fMaxs);
 	
 	AcceptEntityInput(iTrigger, "Disable");
