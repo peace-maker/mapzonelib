@@ -106,6 +106,7 @@ ConVar g_hCVOptimizeBeams;
 ConVar g_hCVDebugBeamDistance;
 ConVar g_hCVMinHeight;
 ConVar g_hCVDefaultHeight;
+ConVar g_hCVDefaultSnapToGrid;
 
 ConVar g_hCVDatabaseConfig;
 ConVar g_hCVTablePrefix;
@@ -204,6 +205,7 @@ public void OnPluginStart()
 	g_hCVDebugBeamDistance = CreateConVar("sm_mapzone_debug_beamdistance", "5000", "Only show zones that are as close as up to x units to the player.", _, true, 0.0);
 	g_hCVMinHeight = CreateConVar("sm_mapzone_minheight", "10", "Snap to the default_height if zone is below this height.", _, true, 0.0);
 	g_hCVDefaultHeight = CreateConVar("sm_mapzone_default_height", "128", "The default height of a zone when it's below the minimum height. 0 to disable.", _, true, 0.0);
+	g_hCVDefaultSnapToGrid = CreateConVar("sm_mapzone_default_snaptogrid_enabled", "0", "Enable Snap to map grid by default?", _, true, 0.0, true, 1.0);
 	g_hCVDatabaseConfig = CreateConVar("sm_mapzone_database_config", "", "The database section in databases.cfg to connect to. Optionally save and load zones from that database. Only used when this option is set. Will still save the zones to local files too as backup if database is unavailable.");
 	g_hCVTablePrefix = CreateConVar("sm_mapzone_database_prefix", "zones_", "Optional prefix of the database tables. e.g. \"zone_\"");
 	
@@ -343,7 +345,7 @@ public void OnClientDisconnect(int client)
 	g_ClientMenuState[client][CMS_stepSizeIndex] = DEFAULT_STEPSIZE_INDEX;
 	g_ClientMenuState[client][CMS_aimCapDistance] = -1.0;
 	g_ClientMenuState[client][CMS_redrawPointMenu] = false;
-	g_ClientMenuState[client][CMS_snapToGrid] = false;
+	g_ClientMenuState[client][CMS_snapToGrid] = g_hCVDefaultSnapToGrid.BoolValue;
 	Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
 	Array_Fill(g_ClientMenuState[client][CMS_center], 3, 0.0);
 	ResetZoneAddingState(client);
