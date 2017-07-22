@@ -592,31 +592,31 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	int iRemoveButtons;
 	if (IsClientEditingZonePosition(client) && !g_ClientMenuState[client][CMS_disablePreview])
 	{
-		// Started pressing +use
+		// Started pressing +use or +attack
 		// See if he wants to set a zone's position.
-		if(buttons & IN_USE && !(g_iClientButtons[client] & IN_USE))
+		if((buttons & IN_USE && !(g_iClientButtons[client] & IN_USE))
+		|| (buttons & IN_ATTACK && !(g_iClientButtons[client] & IN_ATTACK)))
 		{
-			float fUnsnappedOrigin[3], fSnappedOrigin[3], fGroundNormal[3];
-			GetClientFeetPosition(client, fUnsnappedOrigin, fGroundNormal);
-			
-			// Snap the position to the grid if user wants it.
-			SnapToGrid(client, fUnsnappedOrigin, fSnappedOrigin, fGroundNormal);
-			
-			HandleZonePositionSetting(client, fSnappedOrigin);
+			float fUnsnappedOrigin[3], fSnappedOrigin[3];
+			// Set the position where the preview is.
+			if (g_ClientMenuState[client][CMS_previewMode] == ZPM_feet)
+			{
+				float fGroundNormal[3];
+				GetClientFeetPosition(client, fUnsnappedOrigin, fGroundNormal);
+				
+				// Snap the position to the grid if user wants it.
+				SnapToGrid(client, fUnsnappedOrigin, fSnappedOrigin, fGroundNormal);
+
+				HandleZonePositionSetting(client, fSnappedOrigin);
+			}
+			else
+			{
+				if (GetClientZoneAimPosition(client, fSnappedOrigin, fUnsnappedOrigin))
+					HandleZonePositionSetting(client, fSnappedOrigin);
+			}
 			
 			// Don't let that action go through.
-			iRemoveButtons |= IN_USE;
-		}
-		
-		// Started pressing +attack
-		// See if he wants to set a zone's position.
-		if(buttons & IN_ATTACK && !(g_iClientButtons[client] & IN_ATTACK))
-		{
-			float fAimPosition[3], fUnsnappedAimPosition[3];
-			if (GetClientZoneAimPosition(client, fAimPosition, fUnsnappedAimPosition))
-				HandleZonePositionSetting(client, fAimPosition);
-			// Don't let that action go through.
-			iRemoveButtons |= IN_ATTACK;
+			iRemoveButtons |= IN_USE|IN_ATTACK;
 		}
 		
 		// Presses +attack2!
@@ -3229,7 +3229,7 @@ void DisplayZonePointEditMenu(int client)
 	Menu hMenu = new Menu(Menu_HandleZonePointEdit);
 	if(g_ClientMenuState[client][CMS_addZone])
 	{
-		hMenu.SetTitle("Add new zone > Position %d\nClick on the point or push \"e\" to set it at your feet.", view_as<int>(g_ClientMenuState[client][CMS_editState])+1);
+		hMenu.SetTitle("Add new zone > Position %d\nClick or push \"e\" to set the point at the preview position.", view_as<int>(g_ClientMenuState[client][CMS_editState])+1);
 	}
 	else
 	{
@@ -3237,11 +3237,11 @@ void DisplayZonePointEditMenu(int client)
 		GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
 		if(g_ClientMenuState[client][CMS_editCenter])
 		{
-			hMenu.SetTitle("Edit zone \"%s\" center\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name]);
+			hMenu.SetTitle("Edit zone \"%s\" center\nClick or push \"e\" to set the point at the preview position.", zoneData[ZD_name]);
 		}
 		else
 		{
-			hMenu.SetTitle("Edit zone \"%s\" position %d\nClick on the point or push \"e\" to set it at your feet.", zoneData[ZD_name], view_as<int>(g_ClientMenuState[client][CMS_editState])+1);
+			hMenu.SetTitle("Edit zone \"%s\" position %d\nClick or push \"e\" to set the point at the preview position.", zoneData[ZD_name], view_as<int>(g_ClientMenuState[client][CMS_editState])+1);
 		}
 	}
 	hMenu.ExitBackButton = true;
