@@ -108,6 +108,7 @@ ConVar g_hCVMinHeight;
 ConVar g_hCVDefaultHeight;
 ConVar g_hCVDefaultSnapToGrid;
 ConVar g_hCVPlayerCenterCollision;
+ConVar g_hCVDisableAimCapDistance;
 
 ConVar g_hCVDatabaseConfig;
 ConVar g_hCVTablePrefix;
@@ -208,6 +209,7 @@ public void OnPluginStart()
 	g_hCVDefaultHeight = CreateConVar("sm_mapzone_default_height", "128", "The default height of a zone when it's below the minimum height. 0 to disable.", _, true, 0.0);
 	g_hCVDefaultSnapToGrid = CreateConVar("sm_mapzone_default_snaptogrid_enabled", "0", "Enable snapping to map grid by default?", _, true, 0.0, true, 1.0);
 	g_hCVPlayerCenterCollision = CreateConVar("sm_mapzone_player_center_trigger", "0", "Shrink the zone trigger by half the size of a player model to make it look like the center of the player has to be in a zone to make him register as being in it?", _, true, 0.0, true, 1.0);
+	g_hCVDisableAimCapDistance = CreateConVar("sm_mapzone_disable_aim_cap_distance", "0", "Disable holding rightclick and moving the mouse up and down to change the maximum distance to trace for?", _, true, 0.0, true, 1.0);
 	g_hCVDatabaseConfig = CreateConVar("sm_mapzone_database_config", "", "The database section in databases.cfg to connect to. Optionally save and load zones from that database. Only used when this option is set. Will still save the zones to local files too as backup if database is unavailable.");
 	g_hCVTablePrefix = CreateConVar("sm_mapzone_database_prefix", "zones_", "Optional prefix of the database tables. e.g. \"zone_\"");
 	
@@ -215,6 +217,7 @@ public void OnPluginStart()
 	
 	g_hCVShowZonesDefault.AddChangeHook(ConVar_OnDebugChanged);
 	g_hCVPlayerCenterCollision.AddChangeHook(ConVar_OnPlayerCenterCollisionChanged);
+	g_hCVDisableAimCapDistance.AddChangeHook(ConVar_OnDisableAimCapDistanceChanged);
 	
 	HookEvent("round_start", Event_OnRoundStart);
 	HookEvent("player_spawn", Event_OnPlayerSpawn);
@@ -618,7 +621,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		
 		// Presses +attack2!
 		// Save current view angles and move the aim target distance cap according to his mouse moving up and down.
-		if(buttons & IN_ATTACK2 && g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
+		if(buttons & IN_ATTACK2 && g_ClientMenuState[client][CMS_previewMode] == ZPM_aim && !g_hCVDisableAimCapDistance.BoolValue)
 		{
 			// Started pressing +attack2?
 			// Save the current angles as a reference.
@@ -757,6 +760,16 @@ public void ConVar_OnPlayerCenterCollisionChanged(ConVar convar, const char[] ol
 			ApplyNewTriggerBounds(zoneData);
 		}
 	}
+}
+
+public void ConVar_OnDisableAimCapDistanceChanged(ConVar convar, const char[] oldValue, const char[] newValue)
+{
+	if (!g_hCVDisableAimCapDistance.BoolValue)
+		return;
+
+	// Reset the aim cap for all players, since they won't be able to change or reset it anymore.
+	for(int i=1;i<=MaxClients;i++)
+		g_ClientMenuState[i][CMS_aimCapDistance] = -1.0;
 }
 
 /**
@@ -3249,20 +3262,23 @@ void DisplayZonePointEditMenu(int client)
 	Format(sBuffer, sizeof(sBuffer), "Stepsize: %.0f", g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]]);
 	hMenu.AddItem("togglestepsize", sBuffer);
 	
-	if (g_ClientMenuState[client][CMS_aimCapDistance] < 0.0)
+	if (!g_hCVDisableAimCapDistance.BoolValue)
 	{
-		Format(sBuffer, sizeof(sBuffer), "Max. aim distance: Disabled");
-		if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
-			Format(sBuffer, sizeof(sBuffer), "%s\nHold rightclick and move mouse up and down to change.", sBuffer);
-		hMenu.AddItem("resetaimdistance", sBuffer, ITEMDRAW_DISABLED);
-	}
-	else
-	{
-		Format(sBuffer, sizeof(sBuffer), "Max. aim distance: %.2f", g_ClientMenuState[client][CMS_aimCapDistance]);
-		if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
-			Format(sBuffer, sizeof(sBuffer), "%s\nHold rightclick and move mouse up and down to change.", sBuffer);
-		Format(sBuffer, sizeof(sBuffer), "%s\nSelect menu option to remove limit.", sBuffer);
-		hMenu.AddItem("resetaimdistance", sBuffer);
+		if (g_ClientMenuState[client][CMS_aimCapDistance] < 0.0)
+		{
+			Format(sBuffer, sizeof(sBuffer), "Max. aim distance: Disabled");
+			if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
+				Format(sBuffer, sizeof(sBuffer), "%s\nHold rightclick and move mouse up and down to change.", sBuffer);
+			hMenu.AddItem("resetaimdistance", sBuffer, ITEMDRAW_DISABLED);
+		}
+		else
+		{
+			Format(sBuffer, sizeof(sBuffer), "Max. aim distance: %.2f", g_ClientMenuState[client][CMS_aimCapDistance]);
+			if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
+				Format(sBuffer, sizeof(sBuffer), "%s\nHold rightclick and move mouse up and down to change.", sBuffer);
+			Format(sBuffer, sizeof(sBuffer), "%s\nSelect menu option to remove limit.", sBuffer);
+			hMenu.AddItem("resetaimdistance", sBuffer);
+		}
 	}
 	
 	Format(sBuffer, sizeof(sBuffer), "Snap to map grid: %s", g_ClientMenuState[client][CMS_snapToGrid]?"Enabled":"Disabled");
@@ -5236,7 +5252,7 @@ bool GetClientZoneAimPosition(int client, float fTarget[3], float fUnsnappedTarg
 	// When a player is currently holding rightclick while editing a zone point position,
 	// he's trying to adjust the maximal distance of the laserpointer point which specifies the target position.
 	// Don't change the pointer position while moving the mouse up and down to change the distance.
-	bool bIsAdjustingAimLimit = g_ClientMenuState[client][CMS_previewMode] == ZPM_aim && (g_iClientButtons[client] & IN_ATTACK2 == IN_ATTACK2) && IsClientEditingZonePosition(client);
+	bool bIsAdjustingAimLimit = g_ClientMenuState[client][CMS_previewMode] == ZPM_aim && (g_iClientButtons[client] & IN_ATTACK2 == IN_ATTACK2) && IsClientEditingZonePosition(client) && !g_hCVDisableAimCapDistance.BoolValue;
 	if (bIsAdjustingAimLimit)
 	{
 		fClientAngles = g_fAimCapTempAngles[client];
