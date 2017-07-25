@@ -109,6 +109,7 @@ ConVar g_hCVDefaultHeight;
 ConVar g_hCVDefaultSnapToGrid;
 ConVar g_hCVPlayerCenterCollision;
 ConVar g_hCVDisableAimCapDistance;
+ConVar g_hCVBeamOffset;
 
 ConVar g_hCVDatabaseConfig;
 ConVar g_hCVTablePrefix;
@@ -210,6 +211,7 @@ public void OnPluginStart()
 	g_hCVDefaultSnapToGrid = CreateConVar("sm_mapzone_default_snaptogrid_enabled", "0", "Enable snapping to map grid by default?", _, true, 0.0, true, 1.0);
 	g_hCVPlayerCenterCollision = CreateConVar("sm_mapzone_player_center_trigger", "0", "Shrink the zone trigger by half the size of a player model to make it look like the center of the player has to be in a zone to make him register as being in it?", _, true, 0.0, true, 1.0);
 	g_hCVDisableAimCapDistance = CreateConVar("sm_mapzone_disable_aim_cap_distance", "0", "Disable holding rightclick and moving the mouse up and down to change the maximum distance to trace for?", _, true, 0.0, true, 1.0);
+	g_hCVBeamOffset = CreateConVar("sm_mapzone_beam_offset", "0", "Add this offset to the displayed beams to e.g. make them look smaller than the actual trigger is to keep them out of walls.");
 	g_hCVDatabaseConfig = CreateConVar("sm_mapzone_database_config", "", "The database section in databases.cfg to connect to. Optionally save and load zones from that database. Only used when this option is set. Will still save the zones to local files too as backup if database is unavailable.");
 	g_hCVTablePrefix = CreateConVar("sm_mapzone_database_prefix", "zones_", "Optional prefix of the database tables. e.g. \"zone_\"");
 	
@@ -1756,6 +1758,10 @@ public Action Timer_ShowZones(Handle timer)
 	int iDefaultColor[4], iColor[4];
 	
 	bool bOptimizeBeams = g_hCVOptimizeBeams.BoolValue;
+	// Prepare an easy to use vector for the beam view offset.
+	float fOffset = g_hCVBeamOffset.FloatValue;
+	float fBeamOffset[3];
+	fBeamOffset[0] = fBeamOffset[1] = fBeamOffset[2] = fOffset;
 	
 	float vFirstPoint[3], vSecondPoint[3];
 	float fClientAngles[3], fClientEyePosition[3], fClientToZonePoint[3], fLength;
@@ -1775,6 +1781,10 @@ public Action Timer_ShowZones(Handle timer)
 			Array_Copy(zoneData[ZD_mins], fMins, 3);
 			Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
 			Array_Copy(zoneData[ZD_rotation], fAngles, 3);
+
+			// Adjust the shown box a bit.
+			SubtractVectors(fMins, fBeamOffset, fMins);
+			AddVectors(fMaxs, fBeamOffset, fMaxs);
 			
 			// Fetch cluster if zone is in one for the color.
 			zoneCluster[ZC_color][0] = -1;
