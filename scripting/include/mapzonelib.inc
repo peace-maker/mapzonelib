@@ -355,6 +355,16 @@ forward void MapZone_OnZoneAddedToCluster(const char[] sZoneGroup, const char[] 
  */
 forward void MapZone_OnZoneRemovedFromCluster(const char[] sZoneGroup, const char[] sZoneName, const char[] sClusterName, int iAdmin);
 
+/**
+ * Called when an admin selected the option to teleport to a zone in the menu.
+ * Right before the client is actually teleported.
+ *
+ * @param client        The client index.
+ * @param sZoneGroup    The name of the group.
+ * @param sZoneName     The name of the zone.
+ */
+forward void MapZone_OnClientTeleportedToZone(int client, const char[] sZoneGroup, const char[] sZoneName);
+
 public SharedPlugin __pl_mapzonelib = 
 {
 	name = "mapzonelib",

@@ -120,6 +120,7 @@ Handle g_hfwdOnCreatedForward;
 Handle g_hfwdOnRemovedForward;
 Handle g_hfwdOnAddedToClusterForward;
 Handle g_hfwdOnRemovedFromClusterForward;
+Handle g_hfwdOnClientTeleportedToZoneForward;
 
 // Displaying of zones using laser beams
 Handle g_hShowZonesTimer;
@@ -199,6 +200,8 @@ public void OnPluginStart()
 	g_hfwdOnAddedToClusterForward = CreateGlobalForward("MapZone_OnZoneAddedToCluster", ET_Ignore, Param_String, Param_String, Param_String, Param_Cell);
 	// forward MapZone_OnZoneRemovedFromCluster(const String:sZoneGroup[], const String:sZoneName[], const String:sClusterName[], iAdmin);
 	g_hfwdOnRemovedFromClusterForward = CreateGlobalForward("MapZone_OnZoneRemovedFromCluster", ET_Ignore, Param_String, Param_String, Param_String, Param_Cell);
+	// forward void MapZone_OnClientTeleportedToZone(int client, const char[] sZoneGroup, const char[] sZoneName);
+	g_hfwdOnClientTeleportedToZoneForward = CreateGlobalForward("MapZone_OnClientTeleportedToZone", ET_Ignore, Param_Cell, Param_String, Param_String);
 	g_hZoneGroups = new ArrayList(view_as<int>(ZoneGroup));
 	
 	LoadTranslations("common.phrases");
@@ -2812,6 +2815,13 @@ public int Menu_HandleZoneEdit(Menu menu, MenuAction action, int param1, int par
 		// Teleport to the zone
 		if(StrEqual(sInfo, "teleport"))
 		{
+			// Inform other plugins, that the player is being teleported.
+			Call_StartForward(g_hfwdOnClientTeleportedToZoneForward);
+			Call_PushCell(param1);
+			Call_PushString(group[ZG_name]);
+			Call_PushString(zoneData[ZD_name]);
+			Call_Finish();
+
 			float vBuf[3];
 			Array_Copy(zoneData[ZD_position], vBuf, 3);
 			TeleportEntity(param1, vBuf, NULL_VECTOR, NULL_VECTOR);
