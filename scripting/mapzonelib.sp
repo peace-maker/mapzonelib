@@ -87,6 +87,7 @@ enum ClientMenuState {
 	Float:CMS_aimCapDistance, // How far away can the aim target wall be at max?
 	bool:CMS_redrawPointMenu, // Player is currently changing the cap distance using right click?
 	bool:CMS_snapToGrid, // Snap to the nearest grid corner when assuming a grid size of CMS_stepSizeIndex.
+	bool:CMS_snapToWall, // Snap to a near wall first before snapping to the grid.
 	Float:CMS_first[3],
 	Float:CMS_second[3],
 	Float:CMS_rotation[3],
@@ -107,6 +108,7 @@ ConVar g_hCVDebugBeamDistance;
 ConVar g_hCVMinHeight;
 ConVar g_hCVDefaultHeight;
 ConVar g_hCVDefaultSnapToGrid;
+ConVar g_hCVDefaultSnapToWalls;
 ConVar g_hCVPlayerCenterCollision;
 ConVar g_hCVDisableAimCapDistance;
 ConVar g_hCVBeamOffset;
@@ -211,7 +213,8 @@ public void OnPluginStart()
 	g_hCVDebugBeamDistance = CreateConVar("sm_mapzone_debug_beamdistance", "5000", "Only show zones that are as close as up to x units to the player.", _, true, 0.0);
 	g_hCVMinHeight = CreateConVar("sm_mapzone_minheight", "10", "Snap to the default_height if zone is below this height.", _, true, 0.0);
 	g_hCVDefaultHeight = CreateConVar("sm_mapzone_default_height", "128", "The default height of a zone when it's below the minimum height. 0 to disable.", _, true, 0.0);
-	g_hCVDefaultSnapToGrid = CreateConVar("sm_mapzone_default_snaptogrid_enabled", "0", "Enable snapping to map grid by default?", _, true, 0.0, true, 1.0);
+	g_hCVDefaultSnapToGrid = CreateConVar("sm_mapzone_default_snaptogrid_enabled", "1", "Enable snapping to map grid by default?", _, true, 0.0, true, 1.0);
+	g_hCVDefaultSnapToWalls = CreateConVar("sm_mapzone_default_snaptowalls_enabled", "1", "Enable snapping to near walls by default?", _, true, 0.0, true, 1.0);
 	g_hCVPlayerCenterCollision = CreateConVar("sm_mapzone_player_center_trigger", "0", "Shrink the zone trigger by half the size of a player model to make it look like the center of the player has to be in a zone to make him register as being in it?", _, true, 0.0, true, 1.0);
 	g_hCVDisableAimCapDistance = CreateConVar("sm_mapzone_disable_aim_cap_distance", "0", "Disable holding rightclick and moving the mouse up and down to change the maximum distance to trace for?", _, true, 0.0, true, 1.0);
 	g_hCVBeamOffset = CreateConVar("sm_mapzone_beam_offset", "0", "Add this offset to the displayed beams to e.g. make them look smaller than the actual trigger is to keep them out of walls.");
@@ -357,6 +360,7 @@ public void OnClientDisconnect(int client)
 	g_ClientMenuState[client][CMS_aimCapDistance] = -1.0;
 	g_ClientMenuState[client][CMS_redrawPointMenu] = false;
 	g_ClientMenuState[client][CMS_snapToGrid] = g_hCVDefaultSnapToGrid.BoolValue;
+	g_ClientMenuState[client][CMS_snapToWall] = g_hCVDefaultSnapToWalls.BoolValue;
 	Array_Fill(g_ClientMenuState[client][CMS_rotation], 3, 0.0);
 	Array_Fill(g_ClientMenuState[client][CMS_center], 3, 0.0);
 	ResetZoneAddingState(client);
@@ -609,8 +613,9 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 				float fGroundNormal[3];
 				GetClientFeetPosition(client, fUnsnappedOrigin, fGroundNormal);
 				
-				// Snap the position to the grid if user wants it.
-				SnapToGrid(client, fUnsnappedOrigin, fSnappedOrigin, fGroundNormal);
+				// Snap the position to the grid if user wants it and there are no walls nearby.
+				if (!SnapToNearWall(client, fUnsnappedOrigin, fSnappedOrigin, fGroundNormal))
+					SnapToGrid(client, fUnsnappedOrigin, fSnappedOrigin, fGroundNormal);
 
 				HandleZonePositionSetting(client, fSnappedOrigin);
 			}
@@ -1988,7 +1993,8 @@ public Action Timer_ShowZoneWhileAdding(Handle timer, any userid)
 	{
 		float fGroundNormal[3];
 		GetClientFeetPosition(client, fUnsnappedTargetPosition, fGroundNormal);
-		SnapToGrid(client, fUnsnappedTargetPosition, fTargetPosition, fGroundNormal);
+		if (!SnapToNearWall(client, fUnsnappedTargetPosition, fTargetPosition, fGroundNormal))
+			SnapToGrid(client, fUnsnappedTargetPosition, fTargetPosition, fGroundNormal);
 		
 		TE_SetupGlowSprite(fTargetPosition, g_iGlowSprite, 0.1, 0.7, 150);
 		TE_SendToClient(client);
@@ -2005,7 +2011,7 @@ public Action Timer_ShowZoneWhileAdding(Handle timer, any userid)
 	}
 	
 	// Show a beam from player position to snapped grid corner.
-	if ((g_ClientMenuState[client][CMS_snapToGrid] || g_ClientMenuState[client][CMS_previewMode] == ZPM_feet)
+	if ((g_ClientMenuState[client][CMS_snapToGrid] || g_ClientMenuState[client][CMS_snapToWall] || g_ClientMenuState[client][CMS_previewMode] == ZPM_feet)
 	&& IsClientEditingZonePosition(client))
 		ShowGridSnapBeamToClient(client, fUnsnappedTargetPosition, fTargetPosition);
 	
@@ -3301,6 +3307,8 @@ void DisplayZonePointEditMenu(int client)
 		}
 	}
 	
+	Format(sBuffer, sizeof(sBuffer), "Snap to walls: %s", g_ClientMenuState[client][CMS_snapToWall]?"Enabled":"Disabled");
+	hMenu.AddItem("togglewallsnap", sBuffer);
 	Format(sBuffer, sizeof(sBuffer), "Snap to map grid: %s", g_ClientMenuState[client][CMS_snapToGrid]?"Enabled":"Disabled");
 	hMenu.AddItem("togglegridsnap", sBuffer);
 	
@@ -3355,6 +3363,10 @@ public int Menu_HandleZonePointEdit(Menu menu, MenuAction action, int param1, in
 		else if(StrEqual(sInfo, "resetaimdistance"))
 		{
 			g_ClientMenuState[param1][CMS_aimCapDistance] = -1.0;
+		}
+		else if(StrEqual(sInfo, "togglewallsnap"))
+		{
+			g_ClientMenuState[param1][CMS_snapToWall] = !g_ClientMenuState[param1][CMS_snapToWall];
 		}
 		else if(StrEqual(sInfo, "togglegridsnap"))
 		{
@@ -5304,8 +5316,9 @@ bool GetClientZoneAimPosition(int client, float fTarget[3], float fUnsnappedTarg
 		if(GetVectorDotProduct(fDirectionToPlayer, fTargetNormal) < 0)
 			NegateVector(fTargetNormal);
 		
-		// Snap the point to the grid, if the user wants it.
-		SnapToGrid(client, fUnsnappedTarget, fTarget, fTargetNormal);
+		// Snap the point to the grid, if the user wants it and there are no walls nearby.
+		if (!SnapToNearWall(client, fUnsnappedTarget, fTarget, fTargetNormal))
+			SnapToGrid(client, fUnsnappedTarget, fTarget, fTargetNormal);
 		
 		MakeVectorFromPoints(fClientPosition, fTarget, fAimDirection);
 		
@@ -5337,6 +5350,72 @@ bool GetClientZoneAimPosition(int client, float fTarget[3], float fUnsnappedTarg
 
 	SnapToGrid(client, fUnsnappedTarget, fTarget, fTargetNormal);
 	
+	return true;
+}
+
+bool SnapToNearWall(int client, float fPoint[3], float fSnappedPoint[3], float fTargetNormal[3])
+{
+	// User has this disabled.
+	if(!g_ClientMenuState[client][CMS_snapToWall])
+		return false;
+
+	// Move the target point a bit above the surface.
+	float fTraceStart[3];
+	AddVectors(fPoint, fTargetNormal, fTraceStart);
+
+	float fTargetSurfaceU[3], fTargetSurfaceV[3];
+	GetVectorVectors(fTargetNormal, fTargetSurfaceU, fTargetSurfaceV);
+	NormalizeVector(fTargetSurfaceU, fTargetSurfaceU);
+	NormalizeVector(fTargetSurfaceV, fTargetSurfaceV);
+
+	// Search around the point on the surface's normal in a circle for nearby walls.
+	float fCirclePoint[3], fCircleAngles[3], fWallPosition[3];
+	float fWallDistance, fClosestWallPosition[3];
+	// Search for a wall in the radius of the step size.
+	float fNearestWallDistance = g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]];
+	bool bWallIsNear = false;
+	for (float fOffset = 0.0; fOffset < 2.0*FLOAT_PI; fOffset += 0.1)
+	{
+		// Generate a point on a circle on the plane.
+		for (int i = 0; i < 3; i++)
+		{
+			// Circle radius is 1 - doesn't matter.
+			fCirclePoint[i] = fTargetSurfaceU[i] * Sine(fOffset) + fTargetSurfaceV[i] * Cosine(fOffset);
+		}
+		GetVectorAngles(fCirclePoint, fCircleAngles);
+
+		// Print debug circle around point along surface normal.
+		// ScaleVector(fCirclePoint, 10.0);
+		// AddVectors(fTraceStart, fCirclePoint, fCirclePoint);
+		// TE_SetupGlowSprite(fCirclePoint, g_iGlowSprite, 0.1, 0.1, 150);
+		// TE_SendToClient(client);
+
+		// See if there is a wall in that direction on the surface plane.
+		TR_TraceRayFilter(fTraceStart, fCircleAngles, MASK_PLAYERSOLID, RayType_Infinite, RayFilter_DontHitPlayers);
+		if (!TR_DidHit())
+			continue;
+
+		// TODO: Check hit normal and make sure it's different enough from the surface normal?
+		// This would assure to only snap to real walls in a ~90° angle.
+
+		TR_GetEndPosition(fWallPosition);
+
+		// See if this one is closer to the initial point than the previously found one.
+		fWallDistance = GetVectorDistance(fTraceStart, fWallPosition);
+		if (fWallDistance < fNearestWallDistance)
+		{
+			fNearestWallDistance = fWallDistance;
+			fClosestWallPosition = fWallPosition;
+			bWallIsNear = true;
+		}
+	}
+
+	// No wall near the current point. Don't snap.
+	if (!bWallIsNear)
+		return false;
+
+	// Move target point back down on to the surface.
+	SubtractVectors(fClosestWallPosition, fTargetNormal, fSnappedPoint);
 	return true;
 }
 
