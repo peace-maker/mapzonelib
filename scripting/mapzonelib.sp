@@ -23,7 +23,7 @@ enum ZoneData {
 	Float:ZD_rotation[3],
 	bool:ZD_deleted, // We can't directly delete zones, because we use the array index as identifier. Deleting would mean an array shiftup.
 	bool:ZD_clientInZone[MAXPLAYERS+1], // List of clients in this zone.
-	bool:ZD_adminShowZone[MAXPLAYERS+1], // List of clients which want to see this zone.
+	ZoneVisibility:ZD_visibility, // Who should see this zone?
 	String:ZD_name[MAX_ZONE_NAME],
 	String:ZD_triggerModel[PLATFORM_MAX_PATH] // Name of the brush model of the trigger which fits this zone best.
 }
@@ -36,7 +36,7 @@ enum ZoneCluster {
 	ZC_color[4],
 	bool:ZC_customKVChanged, // Remember when the custom keyvalues were changed, so we sync the database.
 	StringMap:ZC_customKV,
-	bool:ZC_adminShowZones[MAXPLAYERS+1],  // Just to remember if we want to toggle all zones in this cluster on or off.
+	ZoneVisibility:ZC_visibility,  // Who should see the zones in this cluster?
 	ZC_clientInZones[MAXPLAYERS+1], // Save for each player in how many zones of this cluster he is.
 	String:ZC_name[MAX_ZONE_NAME]
 };
@@ -46,9 +46,9 @@ enum ZoneGroup {
 	ArrayList:ZG_zones,
 	ArrayList:ZG_cluster,
 	Handle:ZG_menuCancelForward,
+	Handle:ZG_visibilityOverrideForward,
 	ZG_filterEntTeam[2], // Filter entities for teams
 	bool:ZG_showZones,
-	bool:ZG_adminShowZones[MAXPLAYERS+1], // Just to remember if we want to toggle all zones in this group on or off.
 	ZG_defaultColor[4],
 	String:ZG_name[MAX_ZONE_GROUP_NAME]
 }
@@ -168,11 +168,12 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("MapZone_ShowMenu", Native_ShowMenu);
 	CreateNative("MapZone_ShowZoneEditMenu", Native_ShowZoneEditMenu);
 	CreateNative("MapZone_SetMenuCancelAction", Native_SetMenuCancelAction);
+	CreateNative("MapZone_AddZoneVisibilityOverrideHandler", Native_AddZoneVisibilityOverrideHandler);
 	CreateNative("MapZone_StartAddingZone", Native_StartAddingZone);
 	CreateNative("MapZone_AddCluster", Native_AddCluster);
 	CreateNative("MapZone_SetZoneDefaultColor", Native_SetZoneDefaultColor);
 	CreateNative("MapZone_SetZoneColor", Native_SetZoneColor);
-	CreateNative("MapZone_SetClientZoneVisibility", Native_SetClientZoneVisibility);
+	CreateNative("MapZone_SetZoneVisibility", Native_SetZoneVisibility);
 	CreateNative("MapZone_ZoneExists", Native_ZoneExists);
 	CreateNative("MapZone_GetZoneIndex", Native_GetZoneIndex);
 	CreateNative("MapZone_GetZoneNameByIndex", Native_GetZoneNameByIndex);
@@ -253,6 +254,9 @@ public void OnPluginEnd()
 	for(int i=0;i<iNumGroups;i++)
 	{
 		GetGroupByIndex(i, group);
+		group[ZG_menuCancelForward] = null;
+		SaveGroup(group);
+
 		iNumZones = group[ZG_zones].Length;
 		for(int c=0;c<iNumZones;c++)
 		{
@@ -376,16 +380,11 @@ public void OnClientDisconnect(int client)
 	int group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
 	for(int i=0;i<iNumGroups;i++)
 	{
-		GetGroupByIndex(i, group);
-		group[ZG_adminShowZones][client] = false;
-		SaveGroup(group);
-		
 		iNumZones = group[ZG_cluster].Length;
 		for(int z=0;z<iNumZones;z++)
 		{
 			GetZoneByIndex(z, group, zoneData);
-			// Doesn't want to see zones anymore.
-			zoneData[ZD_adminShowZone][client] = false;
+			zoneData[ZD_visibility] = ZoneVisibility_Everyone;
 			SaveZone(group, zoneData);
 		}
 		
@@ -396,7 +395,7 @@ public void OnClientDisconnect(int client)
 		{
 			GetZoneClusterByIndex(c, group, zoneCluster);
 			zoneCluster[ZC_clientInZones][client] = 0;
-			zoneCluster[ZC_adminShowZones][client] = false;
+			zoneCluster[ZC_visibility] = ZoneVisibility_Everyone;
 			SaveCluster(group, zoneCluster);
 		}
 	}
@@ -995,8 +994,8 @@ public int Native_SetZoneColor(Handle plugin, int numParams)
 	return false;
 }
 
-// native bool MapZone_SetClientZoneVisibility(const char[] group, const char[] zoneName, int client, bool bVisible);
-public int Native_SetClientZoneVisibility(Handle plugin, int numParams)
+// native bool MapZone_SetZoneVisibility(const char[] group, const char[] zoneName, ZoneVisibility iVisibility);
+public int Native_SetZoneVisibility(Handle plugin, int numParams)
 {
 	char sGroupName[MAX_ZONE_GROUP_NAME];
 	GetNativeString(1, sGroupName, sizeof(sGroupName));
@@ -1008,42 +1007,19 @@ public int Native_SetClientZoneVisibility(Handle plugin, int numParams)
 	char sZoneName[MAX_ZONE_NAME];
 	GetNativeString(2, sZoneName, sizeof(sZoneName));
 	
-	int client = GetNativeCell(3);
-	if (client <= 0 || client > MaxClients || !IsClientInGame(client))
-	{
-		ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d)", client);
-		return false;
-	}
-	
-	bool bVisible = view_as<bool>(GetNativeCell(4));
+	ZoneVisibility iVisibility = GetNativeCell(3);
 	
 	// Find a matching cluster or zone.
 	int zoneCluster[ZoneCluster], zoneData[ZoneData];
 	if (GetZoneClusterByName(sZoneName, group, zoneCluster))
 	{
-		zoneCluster[ZC_adminShowZones][client] = bVisible;
+		zoneCluster[ZC_visibility] = iVisibility;
 		SaveCluster(group, zoneCluster);
-		
-		// Set all zones of this cluster to the same state.
-		int iNumZones = group[ZG_zones].Length;
-		for(int i=0;i<iNumZones;i++)
-		{
-			GetZoneByIndex(i, group, zoneData);
-			if(zoneData[ZD_deleted])
-				continue;
-			
-			if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
-				continue;
-			
-			zoneData[ZD_adminShowZone][client] = bVisible;
-			SaveZone(group, zoneData);
-		}
-		
 		return true;
 	}
 	else if (GetZoneByName(sZoneName, group, zoneData))
 	{
-		zoneData[ZD_adminShowZone][client] = bVisible;
+		zoneData[ZD_visibility] = iVisibility;
 		SaveZone(group, zoneData);
 		return true;
 	}
@@ -1073,6 +1049,28 @@ public int Native_SetMenuCancelAction(Handle plugin, int numParams)
 	SaveGroup(group);
 	
 	return true;
+}
+
+// native bool MapZone_AddZoneVisibilityOverrideHandler(const char[] group, MapZoneVisibilityOverrideCB callback);
+public int Native_AddZoneVisibilityOverrideHandler(Handle plugin, int numParams)
+{
+	char sName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sName, sizeof(sName));
+	Function callback = GetNativeFunction(2);
+	
+	int group[ZoneGroup];
+	if(!GetGroupByName(sName, group))
+		return false;
+	
+	// Someone registered a menu back action before. Overwrite it.
+	if(group[ZG_visibilityOverrideForward] == INVALID_HANDLE)
+	{
+		// typedef MapZoneVisibilityOverrideCB = function Action (int client, ZoneVisibility iVisibility, const char[] group, const char[] zoneName, bool &bShowZone);
+		group[ZG_visibilityOverrideForward] = CreateForward(ET_Hook, Param_Cell, Param_Cell, Param_String, Param_String, Param_CellByRef);
+		SaveGroup(group);
+	}
+	
+	return AddToForward(group[ZG_visibilityOverrideForward], plugin, callback);
 }
 
 // native void MapZone_StartAddingZone(int client, const char[] group, const char[] sZoneName = "", bool bEnableCancelForward = false, const char[] sClusterName = "");
@@ -1830,7 +1828,7 @@ public Action Timer_ShowZones(Handle timer)
 				if(!IsClientInGame(c) || IsFakeClient(c))
 					continue;
 				
-				if(!group[ZG_showZones] && !zoneData[ZD_adminShowZone][c])
+				if(!ShouldShowZoneToClient(c, group, zoneData))
 					continue;
 				
 				// Could the player see the zone?
@@ -2101,10 +2099,8 @@ void DisplayGroupRootMenu(int client, int group[ZoneGroup])
 	char sBuffer[64];
 	hMenu.AddItem("add", "Add new zone");
 	hMenu.AddItem("paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
-	Format(sBuffer, sizeof(sBuffer), "Show Zones to all: %T", (group[ZG_showZones]?"Yes":"No"), client);
+	Format(sBuffer, sizeof(sBuffer), "Override zone visibility: %s", (group[ZG_showZones]?"Yes, show to everyone":"No"));
 	hMenu.AddItem("showzonesall", sBuffer);
-	Format(sBuffer, sizeof(sBuffer), "Show Zones to me only: %T\n \n", (group[ZG_adminShowZones][client]?"Yes":"No"), client);
-	hMenu.AddItem("showzonesme", sBuffer);
 	
 	// Show zone count
 	int iNumZones, zoneData[ZoneData];
@@ -2166,42 +2162,6 @@ public int Menu_HandleGroupRoot(Menu menu, MenuAction action, int param1, int pa
 			
 			// Show zones right away.
 			if(group[ZG_showZones])
-				TriggerTimer(g_hShowZonesTimer, true);
-			DisplayGroupRootMenu(param1, group);
-		}
-		// Show zone only to menu user.
-		else if(StrEqual(sInfo, "showzonesme"))
-		{
-			// warning 226: a variable is assigned to itself (symbol "group")
-			//group[ZG_showZones] = !group[ZG_showZones];
-			// We save the toggle state for this menu in the group.
-			// The actual showing/hiding of zones is done in the below loop.
-			bool swap = !group[ZG_adminShowZones][param1];
-			group[ZG_adminShowZones][param1] = swap;
-			SaveGroup(group);
-			
-			// Set the zones in this group to show for this admin or not.
-			int iNumZones = group[ZG_zones].Length;
-			int zoneData[ZoneData];
-			for(int i=0;i<iNumZones;i++)
-			{
-				GetZoneByIndex(i, group, zoneData);
-				zoneData[ZD_adminShowZone][param1] = swap;
-				SaveZone(group, zoneData);
-			}
-			
-			// Remember this setting for contained clusters too.
-			int iNumClusters = group[ZG_cluster].Length;
-			int zoneCluster[ZoneCluster];
-			for(int i=0;i<iNumClusters;i++)
-			{
-				GetZoneClusterByIndex(i, group, zoneCluster);
-				zoneCluster[ZC_adminShowZones][param1] = swap;
-				SaveCluster(group, zoneCluster);
-			}
-			
-			// Show zones right away.
-			if(group[ZG_adminShowZones][param1])
 				TriggerTimer(g_hShowZonesTimer, true);
 			DisplayGroupRootMenu(param1, group);
 		}
@@ -2485,8 +2445,8 @@ void DisplayClusterEditMenu(int client)
 	hMenu.SetTitle("Manage cluster \"%s\" of group \"%s\"", zoneCluster[ZC_name], group[ZG_name]);
 	
 	char sBuffer[64];
-	Format(sBuffer, sizeof(sBuffer), "Show zones in this cluster to me: %T", (zoneCluster[ZC_adminShowZones][client]?"Yes":"No"), client);
-	hMenu.AddItem("show", sBuffer);
+	Format(sBuffer, sizeof(sBuffer), "Cluster visibility: %s", GetZoneVisibilityString(zoneCluster[ZC_visibility]));
+	hMenu.AddItem("visibility", sBuffer);
 	hMenu.AddItem("add", "Add zone to cluster");
 	
 	char sTeam[32] = "Any";
@@ -2545,11 +2505,10 @@ public int Menu_HandleClusterEdit(Menu menu, MenuAction action, int param1, int 
 		{
 			DisplayZoneListMenu(param1);
 		}
-		// Show all zones in this cluster to one admin
-		else if(StrEqual(sInfo, "show"))
+		// Change the visibility setting of the cluster and all contained zones.
+		else if(StrEqual(sInfo, "visibility"))
 		{
-			bool swap = !zoneCluster[ZC_adminShowZones][param1];
-			zoneCluster[ZC_adminShowZones][param1] = swap;
+			zoneCluster[ZC_visibility] = ++zoneCluster[ZC_visibility] % ZoneVisibility;
 			SaveCluster(group, zoneCluster);
 			
 			// Set all zones of this cluster to the same state.
@@ -2564,13 +2523,12 @@ public int Menu_HandleClusterEdit(Menu menu, MenuAction action, int param1, int 
 				if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
 					continue;
 				
-				zoneData[ZD_adminShowZone][param1] = swap;
+				zoneData[ZD_visibility] = zoneCluster[ZC_visibility];
 				SaveZone(group, zoneData);
 			}
 			
 			// Show zones right away.
-			if(zoneCluster[ZC_adminShowZones][param1])
-				TriggerTimer(g_hShowZonesTimer, true);
+			TriggerTimer(g_hShowZonesTimer, true);
 			
 			DisplayClusterEditMenu(param1);
 		}
@@ -2781,8 +2739,8 @@ void DisplayZoneEditMenu(int client)
 	
 	char sBuffer[128];
 	hMenu.AddItem("teleport", "Teleport to");
-	Format(sBuffer, sizeof(sBuffer), "Show zone to me: %T", (zoneData[ZD_adminShowZone][client]?"Yes":"No"), client);
-	hMenu.AddItem("show", sBuffer);
+	Format(sBuffer, sizeof(sBuffer), "Zone visibility: %s",  GetZoneVisibilityString(zoneData[ZD_visibility]));
+	hMenu.AddItem("visibility", sBuffer);
 	hMenu.AddItem("edit", "Edit zone");
 	
 	char sTeam[32] = "Any";
@@ -2833,15 +2791,13 @@ public int Menu_HandleZoneEdit(Menu menu, MenuAction action, int param1, int par
 			TeleportEntity(param1, vBuf, NULL_VECTOR, NULL_VECTOR);
 			DisplayZoneEditMenu(param1);
 		}
-		// Show zone to admin
-		else if(StrEqual(sInfo, "show"))
+		// Change zone visibility.
+		else if(StrEqual(sInfo, "visibility"))
 		{
-			bool swap = !zoneData[ZD_adminShowZone][param1];
-			zoneData[ZD_adminShowZone][param1] = swap;
+			zoneData[ZD_visibility] = ++zoneData[ZD_visibility] % ZoneVisibility;
 			SaveZone(group, zoneData);
 			
-			if(zoneData[ZD_adminShowZone][param1])
-				TriggerTimer(g_hShowZonesTimer, true);
+			TriggerTimer(g_hShowZonesTimer, true);
 			DisplayZoneEditMenu(param1);
 		}
 		// Edit details like position and rotation
@@ -3825,6 +3781,8 @@ bool LoadZoneGroup(group[ZoneGroup])
 			if (iColor[0] == 0 && iColor[1] == 0 && iColor[2] == 0 && iColor[3] == 0)
 				Array_Fill(iColor, sizeof(iColor), -1);
 			Array_Copy(iColor, zoneCluster[ZC_color], sizeof(iColor));
+
+			zoneCluster[ZC_visibility] = view_as<ZoneVisibility>(hKV.GetNum("visibility")) % ZoneVisibility;
 			
 			// See if there is a custom keyvalues section for this cluster.
 			if(hKV.JumpToKey("custom", false) && hKV.GotoFirstSubKey(false))
@@ -3867,6 +3825,8 @@ bool LoadZoneGroup(group[ZoneGroup])
 		if (iColor[0] == 0 && iColor[1] == 0 && iColor[2] == 0 && iColor[3] == 0)
 				Array_Fill(iColor, sizeof(iColor), -1);
 		Array_Copy(iColor, zoneData[ZD_color], sizeof(iColor));
+
+		zoneData[ZD_visibility] = view_as<ZoneVisibility>(hKV.GetNum("visibility")) % ZoneVisibility;
 		
 		hKV.GetString("name", sZoneName, sizeof(sZoneName), "unnamed");
 		strcopy(zoneData[ZD_name][0], MAX_ZONE_NAME, sZoneName);
@@ -3987,6 +3947,7 @@ bool SaveZoneGroupToFile(int group[ZoneGroup])
 		// Only set the color to the KV if it was set.
 		if (zoneCluster[ZC_color][0] >= 0)
 			hKV.SetColor("color", zoneCluster[ZC_color][0], zoneCluster[ZC_color][1], zoneCluster[ZC_color][2], zoneCluster[ZC_color][3]);
+		hKV.SetNum("visibility", view_as<int>(zoneCluster[ZC_visibility]));
 		
 		AddCustomKeyValues(hKV, zoneCluster[ZC_customKV]);
 		
@@ -4052,6 +4013,7 @@ bool CreateZoneSectionsInKV(KeyValues hKV, int group[ZoneGroup], int iClusterInd
 			// KvSetColor isn't implemented in the SDK when saving to file.
 			hKV.SetString("color", sColor);
 		}
+		hKV.SetNum("visibility", view_as<int>(zoneData[ZD_visibility]));
 		hKV.SetString("name", zoneData[ZD_name]);
 		
 		AddCustomKeyValues(hKV, zoneData[ZD_customKV]);
@@ -4120,10 +4082,10 @@ public void SQL_CheckTables(Database db, DBResultSet results, const char[] error
 	
 	char sQuery[1024];
 	Transaction hTransaction = new Transaction();
-	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%sclusters` (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, CONSTRAINT cluster_in_group UNIQUE (groupname, map, name))", g_sTablePrefix);
+	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%sclusters` (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, visibility INT DEFAULT %d, CONSTRAINT cluster_in_group UNIQUE (groupname, map, name))", g_sTablePrefix, ZoneVisibility_Everyone);
 	hTransaction.AddQuery(sQuery);
 	
-	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%szones` (id INT NOT NULL AUTO_INCREMENT, cluster_id INT NULL, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, pos_x FLOAT NOT NULL, pos_y FLOAT NOT NULL, pos_z FLOAT NOT NULL, min_x FLOAT NOT NULL, min_y FLOAT NOT NULL, min_z FLOAT NOT NULL, max_x FLOAT NOT NULL, max_y FLOAT NOT NULL, max_z FLOAT NOT NULL, rotation_x FLOAT NOT NULL, rotation_y FLOAT NOT NULL, rotation_z FLOAT NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, PRIMARY KEY (id), FOREIGN KEY (cluster_id) REFERENCES `%sclusters`(id) ON DELETE CASCADE, CONSTRAINT zone_in_group UNIQUE (groupname, map, name))", g_sTablePrefix, g_sTablePrefix);
+	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%szones` (id INT NOT NULL AUTO_INCREMENT, cluster_id INT NULL, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, pos_x FLOAT NOT NULL, pos_y FLOAT NOT NULL, pos_z FLOAT NOT NULL, min_x FLOAT NOT NULL, min_y FLOAT NOT NULL, min_z FLOAT NOT NULL, max_x FLOAT NOT NULL, max_y FLOAT NOT NULL, max_z FLOAT NOT NULL, rotation_x FLOAT NOT NULL, rotation_y FLOAT NOT NULL, rotation_z FLOAT NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, visibility INT DEFAULT %d, PRIMARY KEY (id), FOREIGN KEY (cluster_id) REFERENCES `%sclusters`(id) ON DELETE CASCADE, CONSTRAINT zone_in_group UNIQUE (groupname, map, name))", g_sTablePrefix, ZoneVisibility_Everyone, g_sTablePrefix);
 	hTransaction.AddQuery(sQuery);
 	
 	Format(sQuery, sizeof(sQuery), "CREATE FULLTEXT INDEX mapgroup on `%szones` (groupname, map)", g_sTablePrefix);
@@ -4192,7 +4154,7 @@ void LoadZoneGroupFromDatabase(int group[ZoneGroup], int iSequence)
 	
 	// First get all the clusters.
 	char sQuery[512];
-	Format(sQuery, sizeof(sQuery), "SELECT id, name, team, color FROM `%sclusters` WHERE groupname = '%s' AND map = '%s'", g_sTablePrefix, sGroupNameEscaped, sMapEscaped);
+	Format(sQuery, sizeof(sQuery), "SELECT id, name, team, color, visibility FROM `%sclusters` WHERE groupname = '%s' AND map = '%s'", g_sTablePrefix, sGroupNameEscaped, sMapEscaped);
 	DataPack hPack = new DataPack();
 	hPack.WriteCell(iSequence);
 	hPack.WriteCell(group[ZG_index]);
@@ -4222,7 +4184,7 @@ public void SQL_GetClusters(Database db, DBResultSet results, const char[] error
 		return;
 	}
 	
-	// SELECT id, name, team, color
+	// SELECT id, name, team, color, visibility
 	char sClusterIDs[1024];
 	int zoneCluster[ZoneCluster], iColorInt;
 	while (results.FetchRow())
@@ -4235,6 +4197,7 @@ public void SQL_GetClusters(Database db, DBResultSet results, const char[] error
 		zoneCluster[ZC_color][1] = (iColorInt >> 16) & 0xff;
 		zoneCluster[ZC_color][2] = (iColorInt >> 8) & 0xff;
 		zoneCluster[ZC_color][3] = iColorInt & 0xff;
+		zoneCluster[ZC_visibility] = view_as<ZoneVisibility>(results.FetchInt(4)) % ZoneVisibility;
 		
 		zoneCluster[ZC_index] = group[ZG_cluster].Length;
 		group[ZG_cluster].PushArray(zoneCluster[0], view_as<int>(ZoneCluster));
@@ -4306,7 +4269,7 @@ public void SQL_GetClusterKeyValues(Database db, DBResultSet results, const char
 	
 	// Now get all the zones in that group.
 	char sQuery[1024];
-	Format(sQuery, sizeof(sQuery), "SELECT id, cluster_id, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color FROM `%szones` WHERE groupname = '%s' AND map = '%s'", g_sTablePrefix, sGroupNameEscaped, sMapEscaped);
+	Format(sQuery, sizeof(sQuery), "SELECT id, cluster_id, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color, visibility FROM `%szones` WHERE groupname = '%s' AND map = '%s'", g_sTablePrefix, sGroupNameEscaped, sMapEscaped);
 	g_hDatabase.Query(SQL_GetZones, sQuery, data);
 }
 
@@ -4333,7 +4296,7 @@ public void SQL_GetZones(Database db, DBResultSet results, const char[] error, D
 		return;
 	}
 	
-	// SELECT id, cluster_id, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color
+	// SELECT id, cluster_id, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color, visibility
 	char sZoneIDs[1024];
 	int zoneData[ZoneData], iColorInt;
 	while (results.FetchRow())
@@ -4354,6 +4317,7 @@ public void SQL_GetZones(Database db, DBResultSet results, const char[] error, D
 		zoneData[ZD_color][1] = (iColorInt >> 16) & 0xff;
 		zoneData[ZD_color][2] = (iColorInt >> 8) & 0xff;
 		zoneData[ZD_color][3] = iColorInt & 0xff;
+		zoneData[ZD_visibility] = view_as<ZoneVisibility>(results.FetchInt(17)) % ZoneVisibility;
 		
 		zoneData[ZD_triggerEntity] = INVALID_ENT_REFERENCE;
 		zoneData[ZD_index] = group[ZG_zones].Length;
@@ -4497,14 +4461,14 @@ void SaveZoneGroupToDatabase(int group[ZoneGroup])
 		// Update previous cluster.
 		if (zoneCluster[ZC_databaseId] > 0)
 		{
-			Format(sQuery, sizeof(sQuery), "UPDATE `%sclusters` SET name = '%s', team = %d, color = %d WHERE id = %d", g_sTablePrefix, sEscapedZoneName, zoneCluster[ZC_teamFilter], iColor, zoneCluster[ZC_databaseId]);
+			Format(sQuery, sizeof(sQuery), "UPDATE `%sclusters` SET name = '%s', team = %d, color = %d, visibility = %d WHERE id = %d", g_sTablePrefix, sEscapedZoneName, zoneCluster[ZC_teamFilter], iColor, zoneCluster[ZC_visibility], zoneCluster[ZC_databaseId]);
 			// Remember how to reference this cluster for the custom key values.
 			Format(sClusterInsert, sizeof(sClusterInsert), "%d", zoneCluster[ZC_databaseId]);
 		}
 		// Or insert a new one.
 		else
 		{
-			Format(sQuery, sizeof(sQuery), "INSERT INTO `%sclusters` (groupname, map, name, team, color) VALUES ('%s', '%s', '%s', %d, %d)", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName, zoneCluster[ZC_teamFilter], iColor);
+			Format(sQuery, sizeof(sQuery), "INSERT INTO `%sclusters` (groupname, map, name, team, color, visibility) VALUES ('%s', '%s', '%s', %d, %d, %d)", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName, zoneCluster[ZC_teamFilter], iColor, zoneCluster[ZC_visibility]);
 			// This cluster isn't in the database yet, so we need to fetch the id after it got inserted for the custom keyvalues.
 			Format(sClusterInsert, sizeof(sClusterInsert), "(SELECT id FROM `%sclusters` WHERE groupname = '%s' AND map = '%s' AND name = '%s')", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName);
 		}
@@ -4589,14 +4553,14 @@ void SaveZoneGroupToDatabase(int group[ZoneGroup])
 		// Update or insert the zone.
 		if (zoneData[ZD_databaseId] <= 0)
 		{
-			Format(sQuery, sizeof(sQuery), "INSERT INTO `%szones` (cluster_id, groupname, map, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color) VALUES (%s, '%s', '%s', '%s', %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %d, %d)", g_sTablePrefix, sClusterInsert, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName, XYZ(zoneData[ZD_position]), XYZ(zoneData[ZD_mins]), XYZ(zoneData[ZD_maxs]), XYZ(zoneData[ZD_rotation]), zoneData[ZD_teamFilter], iColor);
+			Format(sQuery, sizeof(sQuery), "INSERT INTO `%szones` (cluster_id, groupname, map, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color, visibility) VALUES (%s, '%s', '%s', '%s', %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %d, %d, %d)", g_sTablePrefix, sClusterInsert, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName, XYZ(zoneData[ZD_position]), XYZ(zoneData[ZD_mins]), XYZ(zoneData[ZD_maxs]), XYZ(zoneData[ZD_rotation]), zoneData[ZD_teamFilter], iColor, zoneData[ZD_visibility]);
 			
 			// This zone isn't in the database yet, so we need to fetch the id after it got inserted for the custom keyvalues.
 			Format(sZoneInsert, sizeof(sZoneInsert), "(SELECT id FROM `%szones` WHERE groupname = '%s' AND map = '%s' AND name = '%s')", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName);
 		}
 		else
 		{
-			Format(sQuery, sizeof(sQuery), "UPDATE `%szones` SET cluster_id = %s, name = '%s', pos_x = %f, pos_y = %f, pos_z = %f, min_x = %f, min_y = %f, min_z = %f, max_x = %f, max_y = %f, max_z = %f, rotation_x = %f, rotation_y = %f, rotation_z = %f, team = %d, color = %d WHERE id = %d", g_sTablePrefix, sClusterInsert, sEscapedZoneName, XYZ(zoneData[ZD_position]), XYZ(zoneData[ZD_mins]), XYZ(zoneData[ZD_maxs]), XYZ(zoneData[ZD_rotation]), zoneData[ZD_teamFilter], iColor, zoneData[ZD_databaseId]);
+			Format(sQuery, sizeof(sQuery), "UPDATE `%szones` SET cluster_id = %s, name = '%s', pos_x = %f, pos_y = %f, pos_z = %f, min_x = %f, min_y = %f, min_z = %f, max_x = %f, max_y = %f, max_z = %f, rotation_x = %f, rotation_y = %f, rotation_z = %f, team = %d, color = %d, visibility = %d WHERE id = %d", g_sTablePrefix, sClusterInsert, sEscapedZoneName, XYZ(zoneData[ZD_position]), XYZ(zoneData[ZD_mins]), XYZ(zoneData[ZD_maxs]), XYZ(zoneData[ZD_rotation]), zoneData[ZD_teamFilter], iColor, zoneData[ZD_visibility], zoneData[ZD_databaseId]);
 			
 			Format(sZoneInsert, sizeof(sZoneInsert), "%d", zoneData[ZD_databaseId]);
 		}
@@ -5607,9 +5571,9 @@ void SaveNewZone(int client, const char[] sName)
 	
 	// Display it right away?
 	if(zoneData[ZD_clusterIndex] == -1)
-		zoneData[ZD_adminShowZone][client] = group[ZG_adminShowZones][client];
+		zoneData[ZD_visibility] = ZoneVisibility_Everyone;
 	else
-		zoneData[ZD_adminShowZone][client] = zoneCluster[ZC_adminShowZones][client];
+		zoneData[ZD_visibility] = zoneCluster[ZC_visibility];
 	
 	// Don't use a seperate color for this zone.
 	zoneData[ZD_color][0] = -1;
@@ -5728,6 +5692,7 @@ void AddNewCluster(int group[ZoneGroup], const char[] sClusterName, int zoneClus
 	// Don't use a seperate color for this cluster by default.
 	zoneCluster[ZC_color][0] = -1;
 	zoneCluster[ZC_index] = group[ZG_cluster].Length;
+	zoneCluster[ZC_visibility] = ZoneVisibility_Everyone;
 	group[ZG_cluster].PushArray(zoneCluster[0], view_as<int>(ZoneCluster));
 }
 
@@ -5825,4 +5790,63 @@ public bool RayFilter_DontHitSelf(int entity, int contentsMask, any data)
 public bool RayFilter_DontHitPlayers(int entity, int contentsMask, any data)
 {
 	return entity < 1 && entity > MaxClients;
+}
+
+bool ShouldShowZoneToClient(int client, int group[ZoneGroup], int zoneData[ZoneData])
+{
+	// Override for this group in place?
+	if (group[ZG_showZones])
+		return true;
+
+	// Is there an override registered for this group?
+	if (group[ZG_visibilityOverrideForward] && GetForwardFunctionCount(group[ZG_visibilityOverrideForward]) > 0)
+	{
+		// typedef MapZoneVisibilityOverrideCB = function Action (int client, ZoneVisibility iVisibility, const char[] group, const char[] zoneName, bool &bShowZone);
+		bool bShowZone;
+		Call_StartForward(group[ZG_visibilityOverrideForward]);
+		Call_PushCell(client);
+		Call_PushCell(zoneData[ZD_visibility]);
+		Call_PushString(group[ZG_name]);
+		Call_PushString(zoneData[ZD_name]);
+		Call_PushCellRef(bShowZone);
+
+		// Some listener changed the value, return it.
+		Action iResult;
+		Call_Finish(iResult);
+		if (iResult > Plugin_Continue)
+			return bShowZone;
+	}
+
+	// Implement default behavior.
+	switch (zoneData[ZD_visibility])
+	{
+		// Zone is set to be shown to everyone. Do so.
+		case ZoneVisibility_Everyone:
+			return true;
+
+		// Show the zone if the client is editing that zone group.
+		case ZoneVisibility_WhenEditing:
+			return group[ZG_index] == g_ClientMenuState[client][CMS_group];
+
+		// Show zone if the player has the generic flag.
+		case ZoneVisibility_AdminsOnly:
+			return CheckCommandAccess(client, "mapzonelib_show_zones", ADMFLAG_GENERIC, true);
+	}
+
+	return false;
+}
+
+char GetZoneVisibilityString(ZoneVisibility iVisibility)
+{
+	char sBuffer[64];
+	switch (iVisibility)
+	{
+		case ZoneVisibility_WhenEditing:
+			sBuffer = "When editing";
+		case ZoneVisibility_AdminsOnly:
+			sBuffer = "Admins only";
+		case ZoneVisibility_Everyone:
+			sBuffer = "All players";
+	}
+	return sBuffer;
 }

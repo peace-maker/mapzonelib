@@ -23,6 +23,16 @@ enum MapZoneType
 };
 
 /**
+ * Who the zone is showed to.
+ */
+enum ZoneVisibility
+{
+	ZoneVisibility_WhenEditing, // Show zone when the zone editing menu is open. This is the default and will always be the case even if admins only is set as visibility.
+	ZoneVisibility_AdminsOnly,  // Show zones to admins only.
+	ZoneVisibility_Everyone     // Always show the zone to everyone.
+};
+
+/**
  * Register a new group of zones.
  * Zones created in this group will be saved in a 
  * seperate folder in "configs/mapzonelib/<group>/mapname.zones".
@@ -81,6 +91,31 @@ typedef MapZoneMenuCancelCB = function void (int client, int reason, const char[
 native bool MapZone_SetMenuCancelAction(const char[] group, MapZoneMenuCancelCB callback);
 
 /**
+ * Called when a zone is about to be displayed before default checks are executed.
+ * Can be used to override the visibility setting for that zone 
+ * by changing the bShowZone parameter and returning > Plugin_Continue.
+ *
+ * This is called for every single zone seperately, even if they are in a cluster.
+ *
+ * @param client       The client index.
+ * @param iVisibility  The configured visibility setting of the zone.
+ * @param group        The zone group name.
+ * @param zoneName     The name of the zone.
+ * @param bShowZone    In parameter - Set whether to show the zone to the client or not.
+ * @return             Plugin_Continue to use default behavior of visibility setting, something else to use bShowZone.
+ */
+typedef MapZoneVisibilityOverrideCB = function Action (int client, ZoneVisibility iVisibility, const char[] group, const char[] zoneName, bool &bShowZone);
+
+/**
+ * Register a callback to override who can see a zone when it's about to be shown.
+ *
+ * @param group     The zone group name.
+ * @param callback  The callback function to call when a zone is about to be shown to client.
+ * @return          True if the callback registered, false if no zone group with that name or registration failed.
+ */
+native bool MapZone_AddZoneVisibilityOverrideHandler(const char[] group, MapZoneVisibilityOverrideCB callback);
+
+/**
  * Add a new cluster to that zone group.
  *
  * @param group         The zone group name.
@@ -126,16 +161,14 @@ native bool MapZone_SetZoneDefaultColor(const char[] group, const int iColor[4])
 native bool MapZone_SetZoneColor(const char[] group, const char[] zoneName, const int iColor[4]);
 
 /**
- * Show or hide a zone per client.
- *
- * @param zoneName  The zone group name.
- * @param group     The zone or cluster name.
- * @param client    The client to change the visibility of the zone for.
- * @param bVisible  True to show the zone to the client, false to hide.
- * @return          True when changed, false if no zone group or zone with that name.
- * @error           Invalid client index.
+ * Set the visibility of the zone or cluster.
+ * 
+ * @param zoneName     The zone group name.
+ * @param group        The zone or cluster name.
+ * @param iVisibility  The new visibility setting of the zone.
+ * @return             True if set, false if no zone group or zone with that name.
  */
-native bool MapZone_SetClientZoneVisibility(const char[] group, const char[] zoneName, int client, bool bVisible);
+native bool MapZone_SetZoneVisibility(const char[] group, const char[] zoneName, ZoneVisibility iVisibility);
 
 /**
  * Check if a zone with that name exists in a zone group.
@@ -383,10 +416,12 @@ public void __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_ShowMenu");
 	MarkNativeAsOptional("MapZone_ShowZoneEditMenu");
 	MarkNativeAsOptional("MapZone_SetMenuCancelAction");
+	MarkNativeAsOptional("MapZone_AddZoneVisibilityOverrideHandler");
 	MarkNativeAsOptional("MapZone_StartAddingZone");
 	MarkNativeAsOptional("MapZone_AddCluster");
 	MarkNativeAsOptional("MapZone_SetZoneDefaultColor");
 	MarkNativeAsOptional("MapZone_SetZoneColor");
+	MarkNativeAsOptional("MapZone_SetZoneVisibility");
 	MarkNativeAsOptional("MapZone_GetZoneIndex");
 	MarkNativeAsOptional("MapZone_GetZoneNameByIndex");
 	MarkNativeAsOptional("MapZone_ZoneExists");
