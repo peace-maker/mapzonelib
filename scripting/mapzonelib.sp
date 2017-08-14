@@ -383,6 +383,7 @@ public void OnClientDisconnect(int client)
 	int group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
 	for(int i=0;i<iNumGroups;i++)
 	{
+		GetGroupByIndex(i, group);
 		iNumZones = group[ZG_cluster].Length;
 		for(int z=0;z<iNumZones;z++)
 		{
