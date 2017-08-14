@@ -2479,18 +2479,21 @@ void DisplayClusterEditMenu(int client)
 	hMenu.SetTitle("Manage cluster \"%s\" of group \"%s\"", zoneCluster[ZC_name], group[ZG_name]);
 	
 	char sBuffer[64];
-	if (group[ZG_menuHideFlags] & HideFlag_HideVisibility != HideFlag_HideVisibility)
+	if (group[ZG_menuHideFlags] & HideFlag_Visibility != HideFlag_Visibility)
 	{
 		Format(sBuffer, sizeof(sBuffer), "Cluster visibility: %s", GetZoneVisibilityString(zoneCluster[ZC_visibility]));
 		hMenu.AddItem("visibility", sBuffer);
 	}
 	hMenu.AddItem("add", "Add zone to cluster");
 	
-	char sTeam[32] = "Any";
-	if(zoneCluster[ZC_teamFilter] > 1)
-		GetTeamName(zoneCluster[ZC_teamFilter], sTeam, sizeof(sTeam));
-	Format(sBuffer, sizeof(sBuffer), "Team filter: %s", sTeam);
-	hMenu.AddItem("team", sBuffer);
+	if (group[ZG_menuHideFlags] & HideFlag_TeamFilter != HideFlag_TeamFilter)
+	{
+		char sTeam[32] = "Any";
+		if(zoneCluster[ZC_teamFilter] > 1)
+			GetTeamName(zoneCluster[ZC_teamFilter], sTeam, sizeof(sTeam));
+		Format(sBuffer, sizeof(sBuffer), "Team filter: %s", sTeam);
+		hMenu.AddItem("team", sBuffer);
+	}
 	hMenu.AddItem("paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
 	hMenu.AddItem("rename", "Rename");
 	hMenu.AddItem("delete", "Delete");
@@ -2776,18 +2779,21 @@ void DisplayZoneEditMenu(int client)
 	
 	char sBuffer[128];
 	hMenu.AddItem("teleport", "Teleport to");
-	if (group[ZG_menuHideFlags] & HideFlag_HideVisibility != HideFlag_HideVisibility)
+	if (group[ZG_menuHideFlags] & HideFlag_Visibility != HideFlag_Visibility)
 	{
 		Format(sBuffer, sizeof(sBuffer), "Zone visibility: %s",  GetZoneVisibilityString(zoneData[ZD_visibility]));
 		hMenu.AddItem("visibility", sBuffer);
 	}
 	hMenu.AddItem("edit", "Edit zone");
 	
-	char sTeam[32] = "Any";
-	if(zoneData[ZD_teamFilter] > 1)
-		GetTeamName(zoneData[ZD_teamFilter], sTeam, sizeof(sTeam));
-	Format(sBuffer, sizeof(sBuffer), "Team filter: %s", sTeam);
-	hMenu.AddItem("team", sBuffer);
+	if (group[ZG_menuHideFlags] & HideFlag_TeamFilter != HideFlag_TeamFilter)
+	{
+		char sTeam[32] = "Any";
+		if(zoneData[ZD_teamFilter] > 1)
+			GetTeamName(zoneData[ZD_teamFilter], sTeam, sizeof(sTeam));
+		Format(sBuffer, sizeof(sBuffer), "Team filter: %s", sTeam);
+		hMenu.AddItem("team", sBuffer);
+	}
 	
 	if(zoneData[ZD_clusterIndex] == -1)
 		Format(sBuffer, sizeof(sBuffer), "Add to a cluster");
