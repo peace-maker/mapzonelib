@@ -379,18 +379,11 @@ public void OnClientDisconnect(int client)
 	RemoveClientFromAllZones(client);
 	
 	int iNumGroups = g_hZoneGroups.Length;
-	int iNumClusters, iNumZones;
-	int group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
+	int iNumClusters;
+	int group[ZoneGroup], zoneCluster[ZoneCluster];
 	for(int i=0;i<iNumGroups;i++)
 	{
 		GetGroupByIndex(i, group);
-		iNumZones = group[ZG_cluster].Length;
-		for(int z=0;z<iNumZones;z++)
-		{
-			GetZoneByIndex(z, group, zoneData);
-			zoneData[ZD_visibility] = ZoneVisibility_Everyone;
-			SaveZone(group, zoneData);
-		}
 		
 		// Client is no longer in any clusters.
 		// Just to make sure.
@@ -399,7 +392,6 @@ public void OnClientDisconnect(int client)
 		{
 			GetZoneClusterByIndex(c, group, zoneCluster);
 			zoneCluster[ZC_clientInZones][client] = 0;
-			zoneCluster[ZC_visibility] = ZoneVisibility_Everyone;
 			SaveCluster(group, zoneCluster);
 		}
 	}
