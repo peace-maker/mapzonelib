@@ -33,6 +33,16 @@ enum ZoneVisibility
 };
 
 /**
+ * List of options to hide certain options from menus in a zone group.
+ * @see MapZone_SetGroupMenuHideFlags
+ */
+enum MenuHideFlag
+{
+	HideFlag_None = 0,
+	HideFlag_HideVisibility = 1 // Hide the "Zone visibility" option from the edit menu.
+};
+
+/**
  * Register a new group of zones.
  * Zones created in this group will be saved in a 
  * seperate folder in "configs/mapzonelib/<group>/mapname.zones".
@@ -153,8 +163,8 @@ native bool MapZone_SetZoneDefaultColor(const char[] group, const int iColor[4])
 /**
  * Set the color of the zone.
  *
- * @param zoneName  The zone group name.
- * @param group     The zone or cluster name.
+ * @param group     The zone group name.
+ * @param zoneName  The zone or cluster name.
  * @param iColor    The RGBA colors of the laser.
  * @return          True if set, false if no zone group or zone with that name.
  */
@@ -163,12 +173,30 @@ native bool MapZone_SetZoneColor(const char[] group, const char[] zoneName, cons
 /**
  * Set the visibility of the zone or cluster.
  * 
- * @param zoneName     The zone group name.
- * @param group        The zone or cluster name.
+ * @param group        The zone group name.
+ * @param zoneName     The zone or cluster name.
  * @param iVisibility  The new visibility setting of the zone.
  * @return             True if set, false if no zone group or zone with that name.
  */
 native bool MapZone_SetZoneVisibility(const char[] group, const char[] zoneName, ZoneVisibility iVisibility);
+
+/**
+ * Returns the MenuHideFlags for a zone group.
+ *
+ * @param group        The zone group name.
+ * @return             The MenuHideFlags of the zone group or HideFlag_None if no zone group with that name.
+ */
+native MenuHideFlag MapZone_GetGroupMenuHideFlags(const char[] group);
+
+/**
+ * Set which menu options to hide from the edit menu for a zone group.
+ * @see MenuHideFlag enum
+ *
+ * @param group        The zone group name.
+ * @param iFlags       The flags of the menu items to hide.
+ * @return             True if set, false if no zone group with that name.
+ */
+native bool MapZone_SetGroupMenuHideFlags(const char[] group, MenuHideFlag iFlags);
 
 /**
  * Check if a zone with that name exists in a zone group.
@@ -422,6 +450,8 @@ public void __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_SetZoneDefaultColor");
 	MarkNativeAsOptional("MapZone_SetZoneColor");
 	MarkNativeAsOptional("MapZone_SetZoneVisibility");
+	MarkNativeAsOptional("MapZone_GetGroupMenuHideFlags");
+	MarkNativeAsOptional("MapZone_SetGroupMenuHideFlags");
 	MarkNativeAsOptional("MapZone_GetZoneIndex");
 	MarkNativeAsOptional("MapZone_GetZoneNameByIndex");
 	MarkNativeAsOptional("MapZone_ZoneExists");

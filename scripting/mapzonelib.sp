@@ -47,6 +47,7 @@ enum ZoneGroup {
 	ArrayList:ZG_cluster,
 	Handle:ZG_menuCancelForward,
 	Handle:ZG_visibilityOverrideForward,
+	MenuHideFlag:ZG_menuHideFlags,
 	ZG_filterEntTeam[2], // Filter entities for teams
 	bool:ZG_showZones,
 	ZG_defaultColor[4],
@@ -174,6 +175,8 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("MapZone_SetZoneDefaultColor", Native_SetZoneDefaultColor);
 	CreateNative("MapZone_SetZoneColor", Native_SetZoneColor);
 	CreateNative("MapZone_SetZoneVisibility", Native_SetZoneVisibility);
+	CreateNative("MapZone_GetGroupMenuHideFlags", Native_GetGroupMenuHideFlags);
+	CreateNative("MapZone_SetGroupMenuHideFlags", Native_SetGroupMenuHideFlags);
 	CreateNative("MapZone_ZoneExists", Native_ZoneExists);
 	CreateNative("MapZone_GetZoneIndex", Native_GetZoneIndex);
 	CreateNative("MapZone_GetZoneNameByIndex", Native_GetZoneNameByIndex);
@@ -856,6 +859,8 @@ public int Native_RegisterZoneGroup(Handle plugin, int numParams)
 	group[ZG_cluster] = new ArrayList(view_as<int>(ZoneCluster));
 	group[ZG_showZones] = g_hCVShowZonesDefault.BoolValue;
 	group[ZG_menuCancelForward] = INVALID_HANDLE;
+	group[ZG_visibilityOverrideForward] = INVALID_HANDLE;
+	group[ZG_menuHideFlags] = HideFlag_None;
 	group[ZG_filterEntTeam][0] = INVALID_ENT_REFERENCE;
 	group[ZG_filterEntTeam][1] = INVALID_ENT_REFERENCE;
 	// Default to red color.
@@ -1025,6 +1030,35 @@ public int Native_SetZoneVisibility(Handle plugin, int numParams)
 	}
 		
 	return false;
+}
+
+// native MenuHideFlag MapZone_GetGroupMenuHideFlags(const char[] group);
+public int Native_GetGroupMenuHideFlags(Handle plugin, int numParams)
+{
+	char sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	int group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+		return 0;
+	
+	return view_as<int>(group[ZG_menuHideFlags]);
+}
+
+// native bool MapZone_SetGroupMenuHideFlags(const char[] group, MenuHideFlag iFlags);
+public int Native_SetGroupMenuHideFlags(Handle plugin, int numParams)
+{
+	char sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	int group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+		return false;
+	
+	group[ZG_menuHideFlags] = GetNativeCell(2);
+	SaveGroup(group);
+		
+	return true;
 }
 
 // native bool MapZone_SetMenuCancelAction(const char[] group, MapZoneMenuCancelCB callback);
@@ -2445,8 +2479,11 @@ void DisplayClusterEditMenu(int client)
 	hMenu.SetTitle("Manage cluster \"%s\" of group \"%s\"", zoneCluster[ZC_name], group[ZG_name]);
 	
 	char sBuffer[64];
-	Format(sBuffer, sizeof(sBuffer), "Cluster visibility: %s", GetZoneVisibilityString(zoneCluster[ZC_visibility]));
-	hMenu.AddItem("visibility", sBuffer);
+	if (group[ZG_menuHideFlags] & HideFlag_HideVisibility != HideFlag_HideVisibility)
+	{
+		Format(sBuffer, sizeof(sBuffer), "Cluster visibility: %s", GetZoneVisibilityString(zoneCluster[ZC_visibility]));
+		hMenu.AddItem("visibility", sBuffer);
+	}
 	hMenu.AddItem("add", "Add zone to cluster");
 	
 	char sTeam[32] = "Any";
@@ -2739,8 +2776,11 @@ void DisplayZoneEditMenu(int client)
 	
 	char sBuffer[128];
 	hMenu.AddItem("teleport", "Teleport to");
-	Format(sBuffer, sizeof(sBuffer), "Zone visibility: %s",  GetZoneVisibilityString(zoneData[ZD_visibility]));
-	hMenu.AddItem("visibility", sBuffer);
+	if (group[ZG_menuHideFlags] & HideFlag_HideVisibility != HideFlag_HideVisibility)
+	{
+		Format(sBuffer, sizeof(sBuffer), "Zone visibility: %s",  GetZoneVisibilityString(zoneData[ZD_visibility]));
+		hMenu.AddItem("visibility", sBuffer);
+	}
 	hMenu.AddItem("edit", "Edit zone");
 	
 	char sTeam[32] = "Any";
