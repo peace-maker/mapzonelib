@@ -5485,6 +5485,7 @@ void SnapToGrid(int client, float fPoint[3], float fSnappedPoint[3], float fTarg
 		}
 		
 		bool bChanged;
+		int iDimension;
 		do
 		{
 			bChanged = false;
@@ -5523,10 +5524,12 @@ void SnapToGrid(int client, float fPoint[3], float fSnappedPoint[3], float fTarg
 					ScaleVector(fTargetNormal, 0.01);
 					AddVectors(fSnappedPoint, fTargetNormal, fSnappedPoint);
 					bChanged = true;
+					iDimension++;
 				}
 			}
 		}
-		while (bChanged);
+		// Only adjust for up to 3 corrections. Ignore if we're outside the world somehow.
+		while (bChanged && iDimension < 3);
 	}
 }
 
