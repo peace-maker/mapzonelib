@@ -3495,6 +3495,7 @@ public int Menu_HandlePointAxisEdit(Menu menu, MenuAction action, int param1, in
 		{
 			int group[ZoneGroup];
 			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
+			g_ClientMenuState[param1][CMS_disablePreview] = false;
 			SaveZonePointModifications(param1, group);
 			return;
 		}
