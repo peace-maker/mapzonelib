@@ -2125,7 +2125,9 @@ void DisplayGroupRootMenu(int client, int group[ZoneGroup])
 	
 	char sBuffer[64];
 	hMenu.AddItem("add", "Add new zone");
-	hMenu.AddItem("paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
+	if (group[ZG_menuHideFlags] & HideFlag_Clipboard != HideFlag_Clipboard)
+		hMenu.AddItem("paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
+
 	Format(sBuffer, sizeof(sBuffer), "Override zone visibility: %s", (group[ZG_showZones]?"Yes, show to everyone":"No"));
 	hMenu.AddItem("showzonesall", sBuffer);
 	
@@ -2487,7 +2489,10 @@ void DisplayClusterEditMenu(int client)
 		Format(sBuffer, sizeof(sBuffer), "Team filter: %s", sTeam);
 		hMenu.AddItem("team", sBuffer);
 	}
-	hMenu.AddItem("paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
+
+	if (group[ZG_menuHideFlags] & HideFlag_Clipboard != HideFlag_Clipboard)
+		hMenu.AddItem("paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
+
 	hMenu.AddItem("rename", "Rename");
 	hMenu.AddItem("delete", "Delete");
 	
@@ -2793,7 +2798,9 @@ void DisplayZoneEditMenu(int client)
 	else
 		Format(sBuffer, sizeof(sBuffer), "Remove from cluster \"%s\"", zoneCluster[ZC_name]);
 	hMenu.AddItem("cluster", sBuffer);
-	hMenu.AddItem("copy", "Copy to clipboard");
+
+	if (group[ZG_menuHideFlags] & HideFlag_Clipboard != HideFlag_Clipboard)
+		hMenu.AddItem("copy", "Copy to clipboard");
 	hMenu.AddItem("rename", "Rename");
 	hMenu.AddItem("delete", "Delete");
 	

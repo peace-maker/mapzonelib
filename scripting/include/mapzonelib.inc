@@ -40,7 +40,8 @@ enum MenuHideFlag
 {
 	HideFlag_None = 0,
 	HideFlag_Visibility = 1, // Hide the "Zone visibility" option from the edit menus.
-	HideFlag_TeamFilter = 2 // Hide the "Team filter" option from the edit menus.
+	HideFlag_TeamFilter = 2, // Hide the "Team filter" option from the edit menus.
+	HideFlag_Clipboard = 4   // Hide the Copy & Paste options from the menus.
 };
 
 /**
