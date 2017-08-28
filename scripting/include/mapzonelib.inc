@@ -150,19 +150,29 @@ native void MapZone_AddCluster(const char[] group, const char[] sClusterName, in
 
 /**
  * Start adding a zone in a zone group. Opens the edit menu afterwards.
- * The name can optionally already be provided, so the user skips the naming.
  *
  * @param client                The client index.
  * @param group                 The zone group name.
- * @param zoneName              Optional: The name of the new zone.
  * @param bEnableCancelForward  Call the menu cancel forward when aborting the add or going 
  *                              back from the edit menu instead of the zone list?
  *                              Ignored if no menu cancel callback registered.
  *                              @see MapZone_SetMenuCancelAction
  * @param sClusterName          Optional: The name of the cluster this zone should be added to.
- * @error                       Invalid group name, zone name already taken, invalid client index, invalid cluster name.
+ * @error                       Invalid group name, invalid client index, invalid cluster name.
  */
-native void MapZone_StartAddingZone(int client, const char[] group, const char[] sZoneName = "", bool bEnableCancelForward = false, const char[] sClusterName = "");
+native void MapZone_StartAddingZone(int client, const char[] group, bool bEnableCancelForward = false, const char[] sClusterName = "");
+
+/**
+ * Set the default name of new zones/clusters created by the client from "Zone X" to something else.
+ * A number starting from 1 is appended to the name if it is already taken.
+ *
+ * @param client                The client index.
+ * @param group                 The zone group name.
+ * @param sBaseName             Name of new zones which will be appended by a number to distinguish duplicates.
+ * @param bAutoName             Name new zones or clusters based on this name automatically instead of asking for a name.
+ * @error                       Invalid client index or invalid group name.
+ */
+native void MapZone_SetNewZoneBaseName(int client, const char[] group, const char[] sBaseName, bool bAutoName);
 
 /**
  * Set the default color of the zone beams for this group.
@@ -482,6 +492,7 @@ public void __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_AddZoneVisibilityOverrideHandler");
 	MarkNativeAsOptional("MapZone_StartAddingZone");
 	MarkNativeAsOptional("MapZone_AddCluster");
+	MarkNativeAsOptional("MapZone_SetNewZoneBaseName");
 	MarkNativeAsOptional("MapZone_SetZoneDefaultColor");
 	MarkNativeAsOptional("MapZone_SetZoneColor");
 	MarkNativeAsOptional("MapZone_SetZoneVisibility");

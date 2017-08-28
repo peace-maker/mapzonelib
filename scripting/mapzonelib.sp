@@ -82,7 +82,8 @@ enum ClientMenuState {
 	bool:CMS_editCenter,
 	bool:CMS_editPosition,
 	ZoneEditState:CMS_editState,
-	String:CMS_presetZoneName[MAX_ZONE_NAME], // When adding a zone through the MapZone_StartAddingZone native, a name can be passed with it.
+	String:CMS_baseZoneName[MAX_ZONE_NAME], // Default name of new zones/clusters added.
+	bool:CMS_autoNameZones, // Set the name of new zones automatically without asking the admin.
 	bool:CMS_backToMenuAfterEdit, // Call the menuCancel forward of the group after editing or adding a zone.
 	ZonePreviewMode:CMS_previewMode,
 	bool:CMS_disablePreview, // Used to not show a preview while in the axes modification menu.
@@ -174,6 +175,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("MapZone_AddZoneVisibilityOverrideHandler", Native_AddZoneVisibilityOverrideHandler);
 	CreateNative("MapZone_StartAddingZone", Native_StartAddingZone);
 	CreateNative("MapZone_AddCluster", Native_AddCluster);
+	CreateNative("MapZone_SetNewZoneBaseName", Native_SetNewZoneBaseName);
 	CreateNative("MapZone_SetZoneDefaultColor", Native_SetZoneDefaultColor);
 	CreateNative("MapZone_SetZoneColor", Native_SetZoneColor);
 	CreateNative("MapZone_SetZoneVisibility", Native_SetZoneVisibility);
@@ -364,6 +366,8 @@ public void OnClientDisconnect(int client)
 	g_ClientMenuState[client][CMS_editRotation] = false;
 	g_ClientMenuState[client][CMS_editCenter] = false;
 	g_ClientMenuState[client][CMS_editPosition] = false;
+	g_ClientMenuState[client][CMS_baseZoneName][0] = 0;
+	g_ClientMenuState[client][CMS_autoNameZones] = false;
 	g_ClientMenuState[client][CMS_backToMenuAfterEdit] = false;
 	g_ClientMenuState[client][CMS_previewMode] = ZPM_aim;
 	g_ClientMenuState[client][CMS_disablePreview] = false;
@@ -1202,7 +1206,7 @@ public int Native_AddZoneVisibilityOverrideHandler(Handle plugin, int numParams)
 	return AddToForward(group[ZG_visibilityOverrideForward], plugin, callback);
 }
 
-// native void MapZone_StartAddingZone(int client, const char[] group, const char[] sZoneName = "", bool bEnableCancelForward = false, const char[] sClusterName = "");
+// native void MapZone_StartAddingZone(int client, const char[] group, bool bEnableCancelForward = false, const char[] sClusterName = "");
 public int Native_StartAddingZone(Handle plugin, int numParams)
 {
 	int client = GetNativeCell(1);
@@ -1221,24 +1225,10 @@ public int Native_StartAddingZone(Handle plugin, int numParams)
 		ThrowNativeError(SP_ERROR_NATIVE, "Invalid zone group name \"%s\"", sGroupName);
 		return;
 	}
-	
-	char sZoneName[MAX_ZONE_NAME];
-	GetNativeString(3, sZoneName, sizeof(sZoneName));
-	if(ZoneExistsWithName(group, sZoneName))
-	{
-		ThrowNativeError(SP_ERROR_NATIVE, "There already is a zone named \"%s\" in group \"%s\"", sZoneName, sGroupName);
-		return;
-	}
-	
-	if(ClusterExistsWithName(group, sZoneName))
-	{
-		ThrowNativeError(SP_ERROR_NATIVE, "There already is a cluster named \"%s\" in group \"%s\"", sZoneName, sGroupName);
-		return;
-	}
-	
-	bool bEnableCancelForward = view_as<bool>(GetNativeCell(4));
+
+	bool bEnableCancelForward = view_as<bool>(GetNativeCell(3));
 	char sClusterName[MAX_ZONE_NAME];
-	GetNativeString(5, sClusterName, sizeof(sClusterName));
+	GetNativeString(4, sClusterName, sizeof(sClusterName));
 	
 	// If there is a cluster name provided, add the new zone to that right away.
 	if (sClusterName[0])
@@ -1252,9 +1242,7 @@ public int Native_StartAddingZone(Handle plugin, int numParams)
 		
 		g_ClientMenuState[client][CMS_cluster] = zoneCluster[ZC_index];
 	}
-	
-	// Save the zone name if there's one given.
-	strcopy(g_ClientMenuState[client][CMS_presetZoneName], MAX_ZONE_NAME, sZoneName);
+
 	g_ClientMenuState[client][CMS_group] = group[ZG_index];
 	g_ClientMenuState[client][CMS_backToMenuAfterEdit] = bEnableCancelForward;
 	
@@ -1304,6 +1292,30 @@ public int Native_AddCluster(Handle plugin, int numParams)
 	
 	// Inform other plugins that this cluster is now a thing.
 	CallOnClusterCreated(group, zoneCluster, iAdmin);
+}
+
+// native void MapZone_SetNewZoneBaseName(int client, const char[] group, const char[] sBaseName, bool bAutoName);
+public int Native_SetNewZoneBaseName(Handle plugin, int numParams)
+{
+	int client = GetNativeCell(1);
+	if (client <= 0 || client > MaxClients || !IsClientInGame(client))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d)", client);
+		return;
+	}
+	
+	char sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(2, sGroupName, sizeof(sGroupName));
+	
+	int group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid zone group name \"%s\"", sGroupName);
+		return;
+	}
+
+	GetNativeString(3, g_ClientMenuState[client][CMS_baseZoneName], MAX_ZONE_NAME);
+	g_ClientMenuState[client][CMS_autoNameZones] = GetNativeCell(4) == 1;
 }
 
 // native bool MapZone_ZoneExists(const char[] group, const char[] zoneName);
@@ -2550,8 +2562,21 @@ public int Menu_HandleClusterList(Menu menu, MenuAction action, int param1, int 
 		
 		if(StrEqual(sInfo, "add"))
 		{
-			PrintToChat(param1, "Map Zones > Enter name of new cluster in chat. Type \"!abort\" to abort.");
-			g_ClientMenuState[param1][CMS_addCluster] = true;
+			if (g_ClientMenuState[param1][CMS_autoNameZones])
+			{
+				char sBaseName[MAX_ZONE_NAME];
+				if (g_ClientMenuState[param1][CMS_baseZoneName][0])
+					GetFreeAutoZoneName(group, g_ClientMenuState[param1][CMS_baseZoneName], sBaseName, sizeof(sBaseName));
+				else
+					GetFreeAutoZoneName(group, "Cluster", sBaseName, sizeof(sBaseName));
+				HandleClientNameNewCluster(param1, group, sBaseName, true);
+			}
+			else
+			{
+				PrintToChat(param1, "Map Zones > Enter name of new cluster in chat. Type \"!abort\" to abort.");
+				// TODO: Add menu to use auto generated name too like for zones.
+				g_ClientMenuState[param1][CMS_addCluster] = true;
+			}
 			return;
 		}
 		
@@ -3283,17 +3308,30 @@ public int Menu_HandleClusterSelection(Menu menu, MenuAction action, int param1,
 		char sInfo[32];
 		menu.GetItem(param2, sInfo, sizeof(sInfo));
 		
+		int group[ZoneGroup];
+		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
+
 		if (StrEqual(sInfo, "newcluster"))
 		{
-			PrintToChat(param1, "Map Zones > Enter name of new cluster in chat. Type \"!abort\" to abort.");
-			g_ClientMenuState[param1][CMS_addCluster] = true;
+			if (g_ClientMenuState[param1][CMS_autoNameZones])
+			{
+				char sBaseName[MAX_ZONE_NAME];
+				if (g_ClientMenuState[param1][CMS_baseZoneName][0])
+					GetFreeAutoZoneName(group, g_ClientMenuState[param1][CMS_baseZoneName], sBaseName, sizeof(sBaseName));
+				else
+					GetFreeAutoZoneName(group, "Cluster", sBaseName, sizeof(sBaseName));
+				HandleClientNameNewCluster(param1, group, sBaseName, true);
+			}
+			else
+			{
+				PrintToChat(param1, "Map Zones > Enter name of new cluster in chat. Type \"!abort\" to abort.");
+				// TODO: Add menu to use auto generated name too like for zones.
+				g_ClientMenuState[param1][CMS_addCluster] = true;
+			}
 			return;
 		}
 		
-		int group[ZoneGroup], zoneData[ZoneData], zoneCluster[ZoneCluster];
-		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
-		GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
-		
+		int zoneCluster[ZoneCluster];
 		int iClusterIndex = StringToInt(sInfo);
 		GetZoneClusterByIndex(iClusterIndex, group, zoneCluster);
 		// That cluster isn't available anymore..
@@ -3303,14 +3341,7 @@ public int Menu_HandleClusterSelection(Menu menu, MenuAction action, int param1,
 			return;
 		}
 		
-		PrintToChat(param1, "Map Zones > Zone \"%s\" is now part of cluster \"%s\".", zoneData[ZD_name], zoneCluster[ZC_name]);
-		
-		zoneData[ZD_visibility] = zoneCluster[ZC_visibility];
-		zoneData[ZD_dimensionsToShow] = zoneCluster[ZC_dimensionsToShow];
-		zoneData[ZD_clusterIndex] = iClusterIndex;
-		SaveZone(group, zoneData);
-		
-		CallOnAddedToCluster(group, zoneData, zoneCluster, param1);
+		AddZoneToCluster(param1, group, zoneCluster);
 		
 		DisplayZoneEditMenu(param1);
 	}
@@ -3835,7 +3866,11 @@ void DisplayZoneAddFinalizationMenu(int client)
 	
 	hMenu.AddItem("", "Type zone name in chat to save it. (\"!abort\" to abort)", ITEMDRAW_DISABLED);
 	
-	GetFreeAutoZoneName(group, sBuffer, sizeof(sBuffer));
+	if (g_ClientMenuState[client][CMS_baseZoneName][0])
+		GetFreeAutoZoneName(group, g_ClientMenuState[client][CMS_baseZoneName], sBuffer, sizeof(sBuffer));
+	else
+		GetFreeAutoZoneName(group, "Zone", sBuffer, sizeof(sBuffer));
+
 	Format(sBuffer, sizeof(sBuffer), "Use auto-generated zone name (%s)", sBuffer);
 	hMenu.AddItem("autoname", sBuffer);
 	hMenu.AddItem("discard", "Discard new zone");
@@ -3861,7 +3896,11 @@ public int Menu_HandleAddFinalization(Menu menu, MenuAction action, int param1, 
 		if(StrEqual(sInfo, "autoname"))
 		{
 			char sBuffer[128];
-			GetFreeAutoZoneName(group, sBuffer, sizeof(sBuffer));
+			if (g_ClientMenuState[param1][CMS_baseZoneName][0])
+				GetFreeAutoZoneName(group, g_ClientMenuState[param1][CMS_baseZoneName], sBuffer, sizeof(sBuffer));
+			else
+				GetFreeAutoZoneName(group, "Zone", sBuffer, sizeof(sBuffer));
+
 			SaveNewZone(param1, sBuffer);
 		}
 		// delete the zone
@@ -5431,24 +5470,18 @@ void HandleZonePositionSetting(int client, const float fOrigin[3])
 				int group[ZoneGroup];
 				GetGroupByIndex(g_ClientMenuState[client][CMS_group], group);
 				
-				// See if we have a valid name already given.
-				bool bPresetName = g_ClientMenuState[client][CMS_presetZoneName][0] != 0;
-				
 				// There is a name already given for this zone. use it.
-				if (bPresetName
-				&& !ZoneExistsWithName(group, g_ClientMenuState[client][CMS_presetZoneName])
-				&& !ClusterExistsWithName(group, g_ClientMenuState[client][CMS_presetZoneName]))
+				if (g_ClientMenuState[client][CMS_autoNameZones])
 				{
-					SaveNewZone(client, g_ClientMenuState[client][CMS_presetZoneName]);
+					char sZoneName[MAX_ZONE_NAME];
+					if (g_ClientMenuState[client][CMS_baseZoneName][0])
+						GetFreeAutoZoneName(group, g_ClientMenuState[client][CMS_baseZoneName], sZoneName, sizeof(sZoneName));
+					else
+						GetFreeAutoZoneName(group, "Zone", sZoneName, sizeof(sZoneName));
+					SaveNewZone(client, sZoneName);
 				}
 				else
 				{
-					// Inform admin that the preset name failed.
-					if (bPresetName)
-					{
-						PrintToChat(client, "Map Zones > A zone with the name \"%s\" in group \"%s\" already exists.", g_ClientMenuState[client][CMS_presetZoneName], group[ZG_name]);
-					}
-					
 					g_ClientMenuState[client][CMS_editState] = ZES_name;
 					
 					DisplayZoneAddFinalizationMenu(client);
@@ -5775,7 +5808,6 @@ void ResetZoneAddingState(int client)
 {
 	g_ClientMenuState[client][CMS_addZone] = false;
 	g_ClientMenuState[client][CMS_editState] = ZES_first;
-	g_ClientMenuState[client][CMS_presetZoneName][0] = 0;
 	Array_Fill(g_ClientMenuState[client][CMS_first], 3, 0.0);
 	Array_Fill(g_ClientMenuState[client][CMS_second], 3, 0.0);
 	ClearHandle(g_hShowZoneWhileEditTimer[client]);
@@ -5914,13 +5946,49 @@ void SaveChangedZoneCoordinates(int client, int zoneData[ZoneData])
 	Array_Copy(fPosition, zoneData[ZD_position], 3);
 }
 
-void GetFreeAutoZoneName(int group[ZoneGroup], char[] sBuffer, int maxlen)
+void GetFreeAutoZoneName(int group[ZoneGroup], char[] sBaseName, char[] sBuffer, int maxlen)
 {
+	// Use the name right away if it's not taken yet.
+	if (!StrEqual(sBaseName, "Zone") && !StrEqual(sBaseName, "Cluster") && !ZoneExistsWithName(group, sBaseName) && !ClusterExistsWithName(group, sBaseName))
+	{
+		strcopy(sBuffer, maxlen, sBaseName);
+		return;
+	}
+
+	// Try adding a number to the name.
 	int iIndex = 1;
 	do
 	{
-		Format(sBuffer, maxlen, "Zone %d", iIndex++);
-	} while(ZoneExistsWithName(group, sBuffer));
+		Format(sBuffer, maxlen, "%s %d", sBaseName, iIndex++);
+	} while(ZoneExistsWithName(group, sBuffer) || ClusterExistsWithName(group, sBuffer));
+}
+
+void HandleClientNameNewCluster(int client, int group[ZoneGroup], const char[] sClusterName, bool bIsEditingZone)
+{
+	g_ClientMenuState[client][CMS_addCluster] = false;
+		
+	int zoneCluster[ZoneCluster];
+	AddNewCluster(group, sClusterName, zoneCluster);
+	PrintToChat(client, "Map Zones > Added new cluster \"%s\".", zoneCluster[ZC_name]);
+	
+	g_ClientMenuState[client][CMS_cluster] = zoneCluster[ZC_index];
+
+	// Add the currently edited zone to the new cluster right away.
+	if (bIsEditingZone)
+	{
+		AddZoneToCluster(client, group, zoneCluster);
+		
+		DisplayZoneEditMenu(client);
+	}
+	else
+	{
+		DisplayClusterEditMenu(client);
+	}
+
+	// Get new name in case the cluster got renamed.
+	GetZoneClusterByIndex(zoneCluster[ZC_index], group, zoneCluster);
+	// Inform other plugins that this cluster is now a thing.
+	CallOnClusterCreated(group, zoneCluster, client);
 }
 
 void AddNewCluster(int group[ZoneGroup], const char[] sClusterName, int zoneCluster[ZoneCluster])
@@ -5932,6 +6000,22 @@ void AddNewCluster(int group[ZoneGroup], const char[] sClusterName, int zoneClus
 	zoneCluster[ZC_visibility] = ZoneVisibility_Everyone;
 	zoneCluster[ZC_dimensionsToShow] = Dimension_3D;
 	group[ZG_cluster].PushArray(zoneCluster[0], view_as<int>(ZoneCluster));
+}
+
+void AddZoneToCluster(int client, int group[ZoneGroup], int zoneCluster[ZoneCluster])
+{
+	int zoneData[ZoneData];
+	GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
+
+	PrintToChat(client, "Map Zones > Zone \"%s\" is now part of cluster \"%s\".", zoneData[ZD_name], zoneCluster[ZC_name]);
+
+	zoneData[ZD_visibility] = zoneCluster[ZC_visibility];
+	zoneData[ZD_dimensionsToShow] = zoneCluster[ZC_dimensionsToShow];
+	zoneData[ZD_clusterIndex] = zoneCluster[ZC_index];
+	SaveZone(group, zoneData);
+
+	// Inform other plugins.
+	CallOnAddedToCluster(group, zoneData, zoneCluster, client);
 }
 
 /**
