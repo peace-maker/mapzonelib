@@ -176,6 +176,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("MapZone_StartAddingZone", Native_StartAddingZone);
 	CreateNative("MapZone_AddCluster", Native_AddCluster);
 	CreateNative("MapZone_SetNewZoneBaseName", Native_SetNewZoneBaseName);
+	CreateNative("MapZone_DeleteZone", Native_DeleteZone);
 	CreateNative("MapZone_SetZoneDefaultColor", Native_SetZoneDefaultColor);
 	CreateNative("MapZone_SetZoneColor", Native_SetZoneColor);
 	CreateNative("MapZone_SetZoneVisibility", Native_SetZoneVisibility);
@@ -560,37 +561,7 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 			return Plugin_Handled;
 		}
 		
-		g_ClientMenuState[client][CMS_addCluster] = false;
-		
-		int zoneCluster[ZoneCluster];
-		AddNewCluster(group, sArgs, zoneCluster);
-		PrintToChat(client, "Map Zones > Added new cluster \"%s\".", zoneCluster[ZC_name]);
-		
-		// Add the currently edited zone to the new cluster right away.
-		if (bIsEditingZone)
-		{
-			int zoneData[ZoneData];
-			GetZoneByIndex(g_ClientMenuState[client][CMS_zone], group, zoneData);
-
-			PrintToChat(client, "Map Zones > Zone \"%s\" is now part of cluster \"%s\".", zoneData[ZD_name], zoneCluster[ZC_name]);
-		
-			zoneData[ZD_clusterIndex] = zoneCluster[ZC_index];
-			SaveZone(group, zoneData);
-			
-			// Inform other plugins.
-			CallOnAddedToCluster(group, zoneData, zoneCluster, client);
-			
-			DisplayZoneEditMenu(client);
-		}
-		else
-		{
-			g_ClientMenuState[client][CMS_cluster] = zoneCluster[ZC_index];
-			DisplayClusterEditMenu(client);
-		}
-		
-		// Inform other plugins that this cluster is now a thing.
-		CallOnClusterCreated(group, zoneCluster, client);
-		
+		HandleClientNameNewCluster(client, group, sArgs, bIsEditingZone);
 		return Plugin_Handled;
 	}
 	return Plugin_Continue;
@@ -1316,6 +1287,49 @@ public int Native_SetNewZoneBaseName(Handle plugin, int numParams)
 
 	GetNativeString(3, g_ClientMenuState[client][CMS_baseZoneName], MAX_ZONE_NAME);
 	g_ClientMenuState[client][CMS_autoNameZones] = GetNativeCell(4) == 1;
+}
+
+// native void MapZone_DeleteZone(const char[] group, const char[] zoneName, bool bDeleteChildZones=false, int iAdmin=0);
+public int Native_DeleteZone(Handle plugin, int numParams)
+{
+	char sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	char sZoneName[MAX_ZONE_NAME];
+	GetNativeString(2, sZoneName, sizeof(sZoneName));
+
+	bool bDeleteChildZones = GetNativeCell(3) == 1;
+	int iAdmin = GetNativeCell(4);
+	
+	int group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid group name \"%s\"", sGroupName);
+		return;
+	}
+
+	if (iAdmin < 0 || iAdmin > MaxClients)
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid admin client index %d", iAdmin);
+		return;
+	}
+	
+	int zoneData[ZoneData];
+	if(GetZoneByName(sZoneName, group, zoneData))
+	{
+		DeleteZone(iAdmin, group, zoneData);
+		return;
+	}
+	
+	int zoneCluster[ZoneCluster];
+	if(GetZoneClusterByName(sZoneName, group, zoneCluster))
+	{
+		DeleteCluster(iAdmin, group, zoneCluster, bDeleteChildZones);
+		return;
+	}
+	
+	ThrowNativeError(SP_ERROR_NATIVE, "No zone or cluster with name \"%s\" in group \"%s\".", sZoneName, sGroupName);
+	return;
 }
 
 // native bool MapZone_ZoneExists(const char[] group, const char[] zoneName);
@@ -2861,51 +2875,7 @@ public int Panel_HandleConfirmDeleteCluster(Menu menu, MenuAction action, int pa
 		GetZoneClusterByIndex(g_ClientMenuState[param1][CMS_cluster], group, zoneCluster);
 		
 		bool bDeleteZones = param2 == 1;
-		
-		// Delete all contained zones in the cluster too.
-		// Make sure the trigger is removed.
-		int iNumZones = group[ZG_zones].Length;
-		int zoneData[ZoneData];
-		int iZonesCount;
-		for(int i=0;i<iNumZones;i++)
-		{
-			GetZoneByIndex(i, group, zoneData);
-			if(zoneData[ZD_deleted])
-				continue;
-			
-			// Only delete zones in this cluster!
-			if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
-				continue;
-			
-			// Want to delete the zones in the cluster too?
-			if(bDeleteZones)
-			{
-				RemoveZoneTrigger(group, zoneData);
-				zoneData[ZD_deleted] = true;
-				
-				// Call this before actually deleting, so other plugins can still access the properties.
-				CallOnZoneRemoved(group, zoneData, param1);
-			}
-			// Just remove the zone from the cluster, but keep it.
-			else
-			{
-				zoneData[ZD_clusterIndex] = -1;
-			}
-			SaveZone(group, zoneData);
-			
-			// Inform other plugins that this zone is now "created" on it's own.
-			if (!bDeleteZones)
-				CallOnRemovedFromCluster(group, zoneData, zoneCluster, param1);
-			
-			iZonesCount++;
-		}
-		
-		// Inform other plugins that this cluster is now history.
-		CallOnClusterRemoved(group, zoneCluster, param1);
-		
-		// We can't really delete it, because the array indicies would shift. Just don't save it to file and skip it.
-		zoneCluster[ZC_deleted] = true;
-		SaveCluster(group, zoneCluster);
+		DeleteCluster(param1, group, zoneCluster, bDeleteZones);
 		
 		g_ClientMenuState[param1][CMS_cluster] = -1;
 		// Don't open our own menu if we're told to call the menu cancel callback.
@@ -2916,11 +2886,6 @@ public int Panel_HandleConfirmDeleteCluster(Menu menu, MenuAction action, int pa
 		}
 		
 		DisplayClusterListMenu(param1);
-		
-		if(bDeleteZones)
-			LogAction(param1, -1, "%L deleted cluster \"%s\" and %d contained zones from group \"%s\".", param1, zoneCluster[ZC_name], iZonesCount, group[ZG_name]);
-		else
-			LogAction(param1, -1, "%L deleted cluster \"%s\" from group \"%s\", but kept %d contained zones.", param1, zoneCluster[ZC_name], group[ZG_name], iZonesCount);
 	}
 	else if(action == MenuAction_Cancel)
 	{
@@ -3405,19 +3370,11 @@ public int Panel_HandleConfirmDeleteZone(Menu menu, MenuAction action, int param
 			GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
 			GetZoneByIndex(g_ClientMenuState[param1][CMS_zone], group, zoneData);
 			
-			// Inform other plugins that this zone is no more.
-			// Do it before marking it as deleted, so the plugins can still access its properties.
-			CallOnZoneRemoved(group, zoneData, param1);
-			
-			// We can't really delete it, because the array indicies would shift. Just don't save it to file and skip it.
-			zoneData[ZD_deleted] = true;
-			SaveZone(group, zoneData);
-			RemoveZoneTrigger(group, zoneData);
 			g_ClientMenuState[param1][CMS_zone] = -1;
+			DeleteZone(param1, group, zoneData);
 			
 			if(g_ClientMenuState[param1][CMS_cluster] == -1)
 			{
-				LogAction(param1, -1, "%L deleted zone \"%s\" of group \"%s\".", param1, zoneData[ZD_name], group[ZG_name]);
 				// Don't open our own menu if we're told to call the menu cancel callback.
 				if (TryCallMenuCancelForward(param1, MenuCancel_ExitBack))
 				{
@@ -3429,10 +3386,6 @@ public int Panel_HandleConfirmDeleteZone(Menu menu, MenuAction action, int param
 			}
 			else
 			{
-				int zoneCluster[ZoneCluster];
-				if(zoneData[ZD_clusterIndex] != -1)
-					GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
-				LogAction(param1, -1, "%L deleted zone \"%s\" from cluster \"%s\" of group \"%s\".", param1, zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
 				DisplayClusterEditMenu(param1);
 			}
 		}
@@ -5151,6 +5104,30 @@ void RemoveZoneTrigger(int group[ZoneGroup], int zoneData[ZoneData])
 	AcceptEntityInput(iTrigger, "Kill");
 }
 
+void DeleteZone(int client, int group[ZoneGroup], int zoneData[ZoneData])
+{
+	// Inform other plugins that this zone is no more.
+	// Do it before marking it as deleted, so the plugins can still access its properties.
+	CallOnZoneRemoved(group, zoneData, client);
+	
+	// We can't really delete it, because the array indicies would shift. Just don't save it to file and skip it.
+	zoneData[ZD_deleted] = true;
+	SaveZone(group, zoneData);
+	RemoveZoneTrigger(group, zoneData);
+
+	if (zoneData[ZD_clusterIndex] == -1)
+	{
+		LogAction(client, -1, "%L deleted zone \"%s\" of group \"%s\".", client, zoneData[ZD_name], group[ZG_name]);
+	}
+	else
+	{
+		int zoneCluster[ZoneCluster];
+		if(zoneData[ZD_clusterIndex] != -1)
+			GetZoneClusterByIndex(zoneData[ZD_clusterIndex], group, zoneCluster);
+		LogAction(client, -1, "%L deleted zone \"%s\" from cluster \"%s\" of group \"%s\".", client, zoneData[ZD_name], zoneCluster[ZC_name], group[ZG_name]);
+	}
+}
+
 /**
  * Zone helpers / accessors
  */
@@ -6016,6 +5993,57 @@ void AddZoneToCluster(int client, int group[ZoneGroup], int zoneCluster[ZoneClus
 
 	// Inform other plugins.
 	CallOnAddedToCluster(group, zoneData, zoneCluster, client);
+}
+
+void DeleteCluster(int client, int group[ZoneGroup], int zoneCluster[ZoneCluster], bool bDeleteZones)
+{
+	// Delete all contained zones in the cluster too.
+	// Make sure the trigger is removed.
+	int iNumZones = group[ZG_zones].Length;
+	int zoneData[ZoneData];
+	int iZonesCount;
+	for(int i=0;i<iNumZones;i++)
+	{
+		GetZoneByIndex(i, group, zoneData);
+		if(zoneData[ZD_deleted])
+			continue;
+		
+		// Only delete zones in this cluster!
+		if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
+			continue;
+		
+		// Want to delete the zones in the cluster too?
+		if(bDeleteZones)
+		{
+			zoneData[ZD_deleted] = true;
+			
+			DeleteZone(client, group, zoneData);
+		}
+		// Just remove the zone from the cluster, but keep it.
+		else
+		{
+			zoneData[ZD_clusterIndex] = -1;
+		}
+		SaveZone(group, zoneData);
+		
+		// Inform other plugins that this zone is now "created" on it's own.
+		if (!bDeleteZones)
+			CallOnRemovedFromCluster(group, zoneData, zoneCluster, client);
+		
+		iZonesCount++;
+	}
+	
+	// Inform other plugins that this cluster is now history.
+	CallOnClusterRemoved(group, zoneCluster, client);
+	
+	// We can't really delete it, because the array indicies would shift. Just don't save it to file and skip it.
+	zoneCluster[ZC_deleted] = true;
+	SaveCluster(group, zoneCluster);
+
+	if(bDeleteZones)
+		LogAction(client, -1, "%L deleted cluster \"%s\" and %d contained zones from group \"%s\".", client, zoneCluster[ZC_name], iZonesCount, group[ZG_name]);
+	else
+		LogAction(client, -1, "%L deleted cluster \"%s\" from group \"%s\", but kept %d contained zones.", client, zoneCluster[ZC_name], group[ZG_name], iZonesCount);
 }
 
 /**

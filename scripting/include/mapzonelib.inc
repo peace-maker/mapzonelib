@@ -175,6 +175,17 @@ native void MapZone_StartAddingZone(int client, const char[] group, bool bEnable
 native void MapZone_SetNewZoneBaseName(int client, const char[] group, const char[] sBaseName, bool bAutoName);
 
 /**
+ * Delete a zone or cluster from a group.
+ *
+ * @param group              The zone group name.
+ * @param zoneName           The name of the zone.
+ * @param bDeleteChildZones  Delete all zones contained in the cluster? (Ignored if not a cluster.)
+ * @param iAdmin             Blame the deletion of the zone on this client.
+ * @error                    Invalid group or zone name, invalid admin client index.
+ */
+native void MapZone_DeleteZone(const char[] group, const char[] zoneName, bool bDeleteChildZones=false, int iAdmin=0);
+
+/**
  * Set the default color of the zone beams for this group.
  *
  * @param group   The zone group name.
@@ -493,6 +504,7 @@ public void __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_StartAddingZone");
 	MarkNativeAsOptional("MapZone_AddCluster");
 	MarkNativeAsOptional("MapZone_SetNewZoneBaseName");
+	MarkNativeAsOptional("MapZone_DeleteZone");
 	MarkNativeAsOptional("MapZone_SetZoneDefaultColor");
 	MarkNativeAsOptional("MapZone_SetZoneColor");
 	MarkNativeAsOptional("MapZone_SetZoneVisibility");
