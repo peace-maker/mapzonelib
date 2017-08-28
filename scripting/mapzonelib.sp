@@ -1017,6 +1017,22 @@ public int Native_SetZoneVisibility(Handle plugin, int numParams)
 	{
 		zoneCluster[ZC_visibility] = iVisibility;
 		SaveCluster(group, zoneCluster);
+
+		// Set all zones of this cluster to the same state.
+		int iNumZones = group[ZG_zones].Length;
+		for(int i=0;i<iNumZones;i++)
+		{
+			GetZoneByIndex(i, group, zoneData);
+			if(zoneData[ZD_deleted])
+				continue;
+			
+			if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
+				continue;
+			
+			zoneData[ZD_visibility] = zoneCluster[ZC_visibility];
+			SaveZone(group, zoneData);
+		}
+
 		return true;
 	}
 	else if (GetZoneByName(sZoneName, group, zoneData))
@@ -3289,6 +3305,7 @@ public int Menu_HandleClusterSelection(Menu menu, MenuAction action, int param1,
 		
 		PrintToChat(param1, "Map Zones > Zone \"%s\" is now part of cluster \"%s\".", zoneData[ZD_name], zoneCluster[ZC_name]);
 		
+		zoneData[ZD_visibility] = zoneCluster[ZC_visibility];
 		zoneData[ZD_dimensionsToShow] = zoneCluster[ZC_dimensionsToShow];
 		zoneData[ZD_clusterIndex] = iClusterIndex;
 		SaveZone(group, zoneData);
