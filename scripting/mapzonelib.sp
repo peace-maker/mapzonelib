@@ -15,6 +15,7 @@ enum ZoneData {
 	ZD_clusterIndex,
 	ZD_teamFilter,
 	ZD_color[4],
+	DisplayDimensions:ZD_dimensionsToShow, // Show only one line between the two points, the lower rectangle above the floor or a full 3D box.
 	bool:ZD_customKVChanged, // Remember when the custom keyvalues were changed, so we sync the database.
 	StringMap:ZD_customKV,
 	Float:ZD_position[3],
@@ -34,6 +35,7 @@ enum ZoneCluster {
 	bool:ZC_deleted,
 	ZC_teamFilter,
 	ZC_color[4],
+	DisplayDimensions:ZC_dimensionsToShow, // Show only one line between the two points, the lower rectangle above the floor or a full 3D box.
 	bool:ZC_customKVChanged, // Remember when the custom keyvalues were changed, so we sync the database.
 	StringMap:ZC_customKV,
 	ZoneVisibility:ZC_visibility,  // Who should see the zones in this cluster?
@@ -175,6 +177,8 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("MapZone_SetZoneDefaultColor", Native_SetZoneDefaultColor);
 	CreateNative("MapZone_SetZoneColor", Native_SetZoneColor);
 	CreateNative("MapZone_SetZoneVisibility", Native_SetZoneVisibility);
+	CreateNative("MapZone_GetZoneDisplayDimensions", Native_GetZoneDisplayDimensions);
+	CreateNative("MapZone_SetZoneDisplayDimensions", Native_SetZoneDisplayDimensions);
 	CreateNative("MapZone_GetGroupMenuHideFlags", Native_GetGroupMenuHideFlags);
 	CreateNative("MapZone_SetGroupMenuHideFlags", Native_SetGroupMenuHideFlags);
 	CreateNative("MapZone_ZoneExists", Native_ZoneExists);
@@ -1018,6 +1022,88 @@ public int Native_SetZoneVisibility(Handle plugin, int numParams)
 	else if (GetZoneByName(sZoneName, group, zoneData))
 	{
 		zoneData[ZD_visibility] = iVisibility;
+		SaveZone(group, zoneData);
+		return true;
+	}
+		
+	return false;
+}
+
+// native DisplayDimensions MapZone_GetZoneDisplayDimensions(const char[] group, const char[] zoneName);
+public int Native_GetZoneDisplayDimensions(Handle plugin, int numParams)
+{
+	char sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	int group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid group name \"%s\".", sGroupName);
+		return 0;
+	}
+	
+	char sZoneName[MAX_ZONE_NAME];
+	GetNativeString(2, sZoneName, sizeof(sZoneName));
+	
+	// Find a matching cluster or zone.
+	int zoneCluster[ZoneCluster], zoneData[ZoneData];
+	if (GetZoneClusterByName(sZoneName, group, zoneCluster))
+	{
+		return view_as<int>(zoneCluster[ZC_dimensionsToShow]);
+	}
+	else if (GetZoneByName(sZoneName, group, zoneData))
+	{
+		return view_as<int>(zoneData[ZD_dimensionsToShow]);
+	}
+	else
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "No zone or cluster with name \"%s\".", sZoneName);
+		return 0;
+	}
+}
+
+// native bool MapZone_SetZoneDisplayDimensions(const char[] group, const char[] zoneName, DisplayDimensions iDimension);
+public int Native_SetZoneDisplayDimensions(Handle plugin, int numParams)
+{
+	char sGroupName[MAX_ZONE_GROUP_NAME];
+	GetNativeString(1, sGroupName, sizeof(sGroupName));
+	
+	int group[ZoneGroup];
+	if(!GetGroupByName(sGroupName, group))
+		return false;
+	
+	char sZoneName[MAX_ZONE_NAME];
+	GetNativeString(2, sZoneName, sizeof(sZoneName));
+	
+	DisplayDimensions iDimension = GetNativeCell(3);
+	
+	// Find a matching cluster or zone.
+	int zoneCluster[ZoneCluster], zoneData[ZoneData];
+	if (GetZoneClusterByName(sZoneName, group, zoneCluster))
+	{
+		zoneCluster[ZC_dimensionsToShow] = iDimension;
+		SaveCluster(group, zoneCluster);
+
+		// Set all zones of this cluster to the same state.
+		int iNumZones = group[ZG_zones].Length;
+		for(int i=0;i<iNumZones;i++)
+		{
+			GetZoneByIndex(i, group, zoneData);
+			if(zoneData[ZD_deleted])
+				continue;
+			
+			if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
+				continue;
+			
+			zoneData[ZD_dimensionsToShow] = zoneCluster[ZC_dimensionsToShow];
+			SaveZone(group, zoneData);
+		}
+
+		return true;
+	}
+	else if (GetZoneByName(sZoneName, group, zoneData))
+	{
+		zoneData[ZD_dimensionsToShow] = iDimension;
 		SaveZone(group, zoneData);
 		return true;
 	}
@@ -1898,8 +1984,31 @@ public Action Timer_ShowZones(Handle timer)
 				iClients[iNumClients++] = c;
 			}
 			
-			if(iNumClients > 0)
-				Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, iColor, 5);
+			if(iNumClients == 0)
+				continue;
+
+			switch(zoneData[ZD_dimensionsToShow])
+			{
+				case Dimension_1D:
+				{
+					// Draw a single line between the two points.
+					Math_RotateVector(fMins, fAngles, vFirstPoint);
+					AddVectors(vFirstPoint, fPos, vFirstPoint);
+					Math_RotateVector(fMaxs, fAngles, vSecondPoint);
+					AddVectors(vSecondPoint, fPos, vSecondPoint);
+
+					TE_SetupBeamPoints(vFirstPoint, vSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, iColor, 5);
+					TE_Send(iClients, iNumClients);
+				}
+				case Dimension_2D:
+				{
+					DrawBottomRectangleRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, iColor, 5);
+				}
+				case Dimension_3D:
+				{
+					Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, iColor, 5);
+				}
+			}
 		}
 	}
 	
@@ -2490,6 +2599,12 @@ void DisplayClusterEditMenu(int client)
 		hMenu.AddItem("team", sBuffer);
 	}
 
+	if (group[ZG_menuHideFlags] & HideFlag_Dimensions != HideFlag_Dimensions)
+	{
+		Format(sBuffer, sizeof(sBuffer), "Display mode: %s", GetDisplayDimensionString(zoneCluster[ZC_dimensionsToShow]));
+		hMenu.AddItem("dimensions", sBuffer);
+	}
+
 	if (group[ZG_menuHideFlags] & HideFlag_Clipboard != HideFlag_Clipboard)
 		hMenu.AddItem("paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
 
@@ -2601,6 +2716,33 @@ public int Menu_HandleClusterEdit(Menu menu, MenuAction action, int param1, int 
 				SaveZone(group, zoneData);
 				ApplyTeamRestrictionFilter(group, zoneData);
 			}
+			
+			DisplayClusterEditMenu(param1);
+		}
+		// Change the display mode.
+		else if(StrEqual(sInfo, "dimensions"))
+		{
+			zoneCluster[ZC_dimensionsToShow] = ++zoneCluster[ZC_dimensionsToShow] % DisplayDimensions;
+			SaveCluster(group, zoneCluster);
+			
+			// Set all zones of this cluster to the same state.
+			int iNumZones = group[ZG_zones].Length;
+			int zoneData[ZoneData];
+			for(int i=0;i<iNumZones;i++)
+			{
+				GetZoneByIndex(i, group, zoneData);
+				if(zoneData[ZD_deleted])
+					continue;
+				
+				if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
+					continue;
+				
+				zoneData[ZD_dimensionsToShow] = zoneCluster[ZC_dimensionsToShow];
+				SaveZone(group, zoneData);
+			}
+			
+			// Show zones right away.
+			TriggerTimer(g_hShowZonesTimer, true);
 			
 			DisplayClusterEditMenu(param1);
 		}
@@ -2792,6 +2934,12 @@ void DisplayZoneEditMenu(int client)
 		Format(sBuffer, sizeof(sBuffer), "Team filter: %s", sTeam);
 		hMenu.AddItem("team", sBuffer);
 	}
+
+	if (group[ZG_menuHideFlags] & HideFlag_Dimensions != HideFlag_Dimensions)
+	{
+		Format(sBuffer, sizeof(sBuffer), "Display mode: %s", GetDisplayDimensionString(zoneData[ZD_dimensionsToShow]));
+		hMenu.AddItem("dimensions", sBuffer);
+	}
 	
 	if(zoneData[ZD_clusterIndex] == -1)
 		Format(sBuffer, sizeof(sBuffer), "Add to a cluster");
@@ -2869,7 +3017,16 @@ public int Menu_HandleZoneEdit(Menu menu, MenuAction action, int param1, int par
 			
 			DisplayZoneEditMenu(param1);
 		}
-		// Change the name of the zone
+		// Change the display mode.
+		else if(StrEqual(sInfo, "dimensions"))
+		{
+			zoneData[ZD_dimensionsToShow] = ++zoneData[ZD_dimensionsToShow] % DisplayDimensions;
+			SaveZone(group, zoneData);
+			
+			TriggerTimer(g_hShowZonesTimer, true);
+			DisplayZoneEditMenu(param1);
+		}
+		// Add or remove the zone to a cluster.
 		else if(StrEqual(sInfo, "cluster"))
 		{
 			// Not in a cluster.
@@ -3132,6 +3289,7 @@ public int Menu_HandleClusterSelection(Menu menu, MenuAction action, int param1,
 		
 		PrintToChat(param1, "Map Zones > Zone \"%s\" is now part of cluster \"%s\".", zoneData[ZD_name], zoneCluster[ZC_name]);
 		
+		zoneData[ZD_dimensionsToShow] = zoneCluster[ZC_dimensionsToShow];
 		zoneData[ZD_clusterIndex] = iClusterIndex;
 		SaveZone(group, zoneData);
 		
@@ -3830,6 +3988,7 @@ bool LoadZoneGroup(group[ZoneGroup])
 			Array_Copy(iColor, zoneCluster[ZC_color], sizeof(iColor));
 
 			zoneCluster[ZC_visibility] = view_as<ZoneVisibility>(hKV.GetNum("visibility")) % ZoneVisibility;
+			zoneCluster[ZC_dimensionsToShow] = view_as<DisplayDimensions>(hKV.GetNum("display_dimensions")) % DisplayDimensions;
 			
 			// See if there is a custom keyvalues section for this cluster.
 			if(hKV.JumpToKey("custom", false) && hKV.GotoFirstSubKey(false))
@@ -3874,6 +4033,7 @@ bool LoadZoneGroup(group[ZoneGroup])
 		Array_Copy(iColor, zoneData[ZD_color], sizeof(iColor));
 
 		zoneData[ZD_visibility] = view_as<ZoneVisibility>(hKV.GetNum("visibility")) % ZoneVisibility;
+		zoneData[ZD_dimensionsToShow] = view_as<DisplayDimensions>(hKV.GetNum("display_dimensions")) % DisplayDimensions;
 		
 		hKV.GetString("name", sZoneName, sizeof(sZoneName), "unnamed");
 		strcopy(zoneData[ZD_name][0], MAX_ZONE_NAME, sZoneName);
@@ -3995,6 +4155,7 @@ bool SaveZoneGroupToFile(int group[ZoneGroup])
 		if (zoneCluster[ZC_color][0] >= 0)
 			hKV.SetColor("color", zoneCluster[ZC_color][0], zoneCluster[ZC_color][1], zoneCluster[ZC_color][2], zoneCluster[ZC_color][3]);
 		hKV.SetNum("visibility", view_as<int>(zoneCluster[ZC_visibility]));
+		hKV.SetNum("display_dimensions", view_as<int>(zoneCluster[ZC_dimensionsToShow]));
 		
 		AddCustomKeyValues(hKV, zoneCluster[ZC_customKV]);
 		
@@ -4061,6 +4222,7 @@ bool CreateZoneSectionsInKV(KeyValues hKV, int group[ZoneGroup], int iClusterInd
 			hKV.SetString("color", sColor);
 		}
 		hKV.SetNum("visibility", view_as<int>(zoneData[ZD_visibility]));
+		hKV.SetNum("display_dimensions", view_as<int>(zoneData[ZD_dimensionsToShow]));
 		hKV.SetString("name", zoneData[ZD_name]);
 		
 		AddCustomKeyValues(hKV, zoneData[ZD_customKV]);
@@ -4129,10 +4291,10 @@ public void SQL_CheckTables(Database db, DBResultSet results, const char[] error
 	
 	char sQuery[1024];
 	Transaction hTransaction = new Transaction();
-	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%sclusters` (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, visibility INT DEFAULT %d, CONSTRAINT cluster_in_group UNIQUE (groupname, map, name))", g_sTablePrefix, ZoneVisibility_Everyone);
+	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%sclusters` (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, visibility INT DEFAULT %d, display_dimensions INT DEFAULT %d, CONSTRAINT cluster_in_group UNIQUE (groupname, map, name))", g_sTablePrefix, ZoneVisibility_Everyone, Dimension_3D);
 	hTransaction.AddQuery(sQuery);
 	
-	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%szones` (id INT NOT NULL AUTO_INCREMENT, cluster_id INT NULL, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, pos_x FLOAT NOT NULL, pos_y FLOAT NOT NULL, pos_z FLOAT NOT NULL, min_x FLOAT NOT NULL, min_y FLOAT NOT NULL, min_z FLOAT NOT NULL, max_x FLOAT NOT NULL, max_y FLOAT NOT NULL, max_z FLOAT NOT NULL, rotation_x FLOAT NOT NULL, rotation_y FLOAT NOT NULL, rotation_z FLOAT NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, visibility INT DEFAULT %d, PRIMARY KEY (id), FOREIGN KEY (cluster_id) REFERENCES `%sclusters`(id) ON DELETE CASCADE, CONSTRAINT zone_in_group UNIQUE (groupname, map, name))", g_sTablePrefix, ZoneVisibility_Everyone, g_sTablePrefix);
+	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%szones` (id INT NOT NULL AUTO_INCREMENT, cluster_id INT NULL, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, pos_x FLOAT NOT NULL, pos_y FLOAT NOT NULL, pos_z FLOAT NOT NULL, min_x FLOAT NOT NULL, min_y FLOAT NOT NULL, min_z FLOAT NOT NULL, max_x FLOAT NOT NULL, max_y FLOAT NOT NULL, max_z FLOAT NOT NULL, rotation_x FLOAT NOT NULL, rotation_y FLOAT NOT NULL, rotation_z FLOAT NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, visibility INT DEFAULT %d, display_dimensions INT DEFAULT %d, PRIMARY KEY (id), FOREIGN KEY (cluster_id) REFERENCES `%sclusters`(id) ON DELETE CASCADE, CONSTRAINT zone_in_group UNIQUE (groupname, map, name))", g_sTablePrefix, ZoneVisibility_Everyone, Dimension_3D, g_sTablePrefix);
 	hTransaction.AddQuery(sQuery);
 	
 	Format(sQuery, sizeof(sQuery), "CREATE FULLTEXT INDEX mapgroup on `%szones` (groupname, map)", g_sTablePrefix);
@@ -4201,7 +4363,7 @@ void LoadZoneGroupFromDatabase(int group[ZoneGroup], int iSequence)
 	
 	// First get all the clusters.
 	char sQuery[512];
-	Format(sQuery, sizeof(sQuery), "SELECT id, name, team, color, visibility FROM `%sclusters` WHERE groupname = '%s' AND map = '%s'", g_sTablePrefix, sGroupNameEscaped, sMapEscaped);
+	Format(sQuery, sizeof(sQuery), "SELECT id, name, team, color, visibility, display_dimensions FROM `%sclusters` WHERE groupname = '%s' AND map = '%s'", g_sTablePrefix, sGroupNameEscaped, sMapEscaped);
 	DataPack hPack = new DataPack();
 	hPack.WriteCell(iSequence);
 	hPack.WriteCell(group[ZG_index]);
@@ -4231,7 +4393,7 @@ public void SQL_GetClusters(Database db, DBResultSet results, const char[] error
 		return;
 	}
 	
-	// SELECT id, name, team, color, visibility
+	// SELECT id, name, team, color, visibility, display_dimensions
 	char sClusterIDs[1024];
 	int zoneCluster[ZoneCluster], iColorInt;
 	while (results.FetchRow())
@@ -4245,6 +4407,7 @@ public void SQL_GetClusters(Database db, DBResultSet results, const char[] error
 		zoneCluster[ZC_color][2] = (iColorInt >> 8) & 0xff;
 		zoneCluster[ZC_color][3] = iColorInt & 0xff;
 		zoneCluster[ZC_visibility] = view_as<ZoneVisibility>(results.FetchInt(4)) % ZoneVisibility;
+		zoneCluster[ZC_dimensionsToShow] = view_as<DisplayDimensions>(results.FetchInt(5)) % DisplayDimensions;
 		
 		zoneCluster[ZC_index] = group[ZG_cluster].Length;
 		group[ZG_cluster].PushArray(zoneCluster[0], view_as<int>(ZoneCluster));
@@ -4316,7 +4479,7 @@ public void SQL_GetClusterKeyValues(Database db, DBResultSet results, const char
 	
 	// Now get all the zones in that group.
 	char sQuery[1024];
-	Format(sQuery, sizeof(sQuery), "SELECT id, cluster_id, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color, visibility FROM `%szones` WHERE groupname = '%s' AND map = '%s'", g_sTablePrefix, sGroupNameEscaped, sMapEscaped);
+	Format(sQuery, sizeof(sQuery), "SELECT id, cluster_id, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color, visibility, display_dimensions FROM `%szones` WHERE groupname = '%s' AND map = '%s'", g_sTablePrefix, sGroupNameEscaped, sMapEscaped);
 	g_hDatabase.Query(SQL_GetZones, sQuery, data);
 }
 
@@ -4343,7 +4506,7 @@ public void SQL_GetZones(Database db, DBResultSet results, const char[] error, D
 		return;
 	}
 	
-	// SELECT id, cluster_id, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color, visibility
+	// SELECT id, cluster_id, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color, visibility, display_dimensions
 	char sZoneIDs[1024];
 	int zoneData[ZoneData], iColorInt;
 	while (results.FetchRow())
@@ -4365,6 +4528,7 @@ public void SQL_GetZones(Database db, DBResultSet results, const char[] error, D
 		zoneData[ZD_color][2] = (iColorInt >> 8) & 0xff;
 		zoneData[ZD_color][3] = iColorInt & 0xff;
 		zoneData[ZD_visibility] = view_as<ZoneVisibility>(results.FetchInt(17)) % ZoneVisibility;
+		zoneData[ZD_dimensionsToShow] = view_as<DisplayDimensions>(results.FetchInt(18)) % DisplayDimensions;
 		
 		zoneData[ZD_triggerEntity] = INVALID_ENT_REFERENCE;
 		zoneData[ZD_index] = group[ZG_zones].Length;
@@ -4508,14 +4672,14 @@ void SaveZoneGroupToDatabase(int group[ZoneGroup])
 		// Update previous cluster.
 		if (zoneCluster[ZC_databaseId] > 0)
 		{
-			Format(sQuery, sizeof(sQuery), "UPDATE `%sclusters` SET name = '%s', team = %d, color = %d, visibility = %d WHERE id = %d", g_sTablePrefix, sEscapedZoneName, zoneCluster[ZC_teamFilter], iColor, zoneCluster[ZC_visibility], zoneCluster[ZC_databaseId]);
+			Format(sQuery, sizeof(sQuery), "UPDATE `%sclusters` SET name = '%s', team = %d, color = %d, visibility = %d, display_dimensions = %d WHERE id = %d", g_sTablePrefix, sEscapedZoneName, zoneCluster[ZC_teamFilter], iColor, zoneCluster[ZC_visibility], zoneCluster[ZC_dimensionsToShow], zoneCluster[ZC_databaseId]);
 			// Remember how to reference this cluster for the custom key values.
 			Format(sClusterInsert, sizeof(sClusterInsert), "%d", zoneCluster[ZC_databaseId]);
 		}
 		// Or insert a new one.
 		else
 		{
-			Format(sQuery, sizeof(sQuery), "INSERT INTO `%sclusters` (groupname, map, name, team, color, visibility) VALUES ('%s', '%s', '%s', %d, %d, %d)", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName, zoneCluster[ZC_teamFilter], iColor, zoneCluster[ZC_visibility]);
+			Format(sQuery, sizeof(sQuery), "INSERT INTO `%sclusters` (groupname, map, name, team, color, visibility, display_dimensions) VALUES ('%s', '%s', '%s', %d, %d, %d, %d)", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName, zoneCluster[ZC_teamFilter], iColor, zoneCluster[ZC_visibility], zoneCluster[ZC_dimensionsToShow]);
 			// This cluster isn't in the database yet, so we need to fetch the id after it got inserted for the custom keyvalues.
 			Format(sClusterInsert, sizeof(sClusterInsert), "(SELECT id FROM `%sclusters` WHERE groupname = '%s' AND map = '%s' AND name = '%s')", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName);
 		}
@@ -4600,14 +4764,14 @@ void SaveZoneGroupToDatabase(int group[ZoneGroup])
 		// Update or insert the zone.
 		if (zoneData[ZD_databaseId] <= 0)
 		{
-			Format(sQuery, sizeof(sQuery), "INSERT INTO `%szones` (cluster_id, groupname, map, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color, visibility) VALUES (%s, '%s', '%s', '%s', %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %d, %d, %d)", g_sTablePrefix, sClusterInsert, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName, XYZ(zoneData[ZD_position]), XYZ(zoneData[ZD_mins]), XYZ(zoneData[ZD_maxs]), XYZ(zoneData[ZD_rotation]), zoneData[ZD_teamFilter], iColor, zoneData[ZD_visibility]);
+			Format(sQuery, sizeof(sQuery), "INSERT INTO `%szones` (cluster_id, groupname, map, name, pos_x, pos_y, pos_z, min_x, min_y, min_z, max_x, max_y, max_z, rotation_x, rotation_y, rotation_z, team, color, visibility, display_dimensions) VALUES (%s, '%s', '%s', '%s', %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %d, %d, %d, %d)", g_sTablePrefix, sClusterInsert, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName, XYZ(zoneData[ZD_position]), XYZ(zoneData[ZD_mins]), XYZ(zoneData[ZD_maxs]), XYZ(zoneData[ZD_rotation]), zoneData[ZD_teamFilter], iColor, zoneData[ZD_visibility], zoneData[ZD_dimensionsToShow]);
 			
 			// This zone isn't in the database yet, so we need to fetch the id after it got inserted for the custom keyvalues.
 			Format(sZoneInsert, sizeof(sZoneInsert), "(SELECT id FROM `%szones` WHERE groupname = '%s' AND map = '%s' AND name = '%s')", g_sTablePrefix, sEscapedGroupName, g_sCurrentMap, sEscapedZoneName);
 		}
 		else
 		{
-			Format(sQuery, sizeof(sQuery), "UPDATE `%szones` SET cluster_id = %s, name = '%s', pos_x = %f, pos_y = %f, pos_z = %f, min_x = %f, min_y = %f, min_z = %f, max_x = %f, max_y = %f, max_z = %f, rotation_x = %f, rotation_y = %f, rotation_z = %f, team = %d, color = %d, visibility = %d WHERE id = %d", g_sTablePrefix, sClusterInsert, sEscapedZoneName, XYZ(zoneData[ZD_position]), XYZ(zoneData[ZD_mins]), XYZ(zoneData[ZD_maxs]), XYZ(zoneData[ZD_rotation]), zoneData[ZD_teamFilter], iColor, zoneData[ZD_visibility], zoneData[ZD_databaseId]);
+			Format(sQuery, sizeof(sQuery), "UPDATE `%szones` SET cluster_id = %s, name = '%s', pos_x = %f, pos_y = %f, pos_z = %f, min_x = %f, min_y = %f, min_z = %f, max_x = %f, max_y = %f, max_z = %f, rotation_x = %f, rotation_y = %f, rotation_z = %f, team = %d, color = %d, visibility = %d, display_dimensions = %d WHERE id = %d", g_sTablePrefix, sClusterInsert, sEscapedZoneName, XYZ(zoneData[ZD_position]), XYZ(zoneData[ZD_mins]), XYZ(zoneData[ZD_maxs]), XYZ(zoneData[ZD_rotation]), zoneData[ZD_teamFilter], iColor, zoneData[ZD_visibility], zoneData[ZD_dimensionsToShow], zoneData[ZD_databaseId]);
 			
 			Format(sZoneInsert, sizeof(sZoneInsert), "%d", zoneData[ZD_databaseId]);
 		}
@@ -5619,11 +5783,17 @@ void SaveNewZone(int client, const char[] sName)
 	zoneData[ZD_triggerEntity] = INVALID_ENT_REFERENCE;
 	zoneData[ZD_clusterIndex] = g_ClientMenuState[client][CMS_cluster];
 	
-	// Display it right away?
+	// Inherit the values of the parent cluster.
 	if(zoneData[ZD_clusterIndex] == -1)
+	{
 		zoneData[ZD_visibility] = ZoneVisibility_Everyone;
+		zoneData[ZD_dimensionsToShow] = Dimension_3D;
+	}
 	else
+	{
 		zoneData[ZD_visibility] = zoneCluster[ZC_visibility];
+		zoneData[ZD_dimensionsToShow] = zoneCluster[ZC_dimensionsToShow];
+	}
 	
 	// Don't use a seperate color for this zone.
 	zoneData[ZD_color][0] = -1;
@@ -5743,6 +5913,7 @@ void AddNewCluster(int group[ZoneGroup], const char[] sClusterName, int zoneClus
 	zoneCluster[ZC_color][0] = -1;
 	zoneCluster[ZC_index] = group[ZG_cluster].Length;
 	zoneCluster[ZC_visibility] = ZoneVisibility_Everyone;
+	zoneCluster[ZC_dimensionsToShow] = Dimension_3D;
 	group[ZG_cluster].PushArray(zoneCluster[0], view_as<int>(ZoneCluster));
 }
 
@@ -5899,4 +6070,87 @@ char GetZoneVisibilityString(ZoneVisibility iVisibility)
 			sBuffer = "All players";
 	}
 	return sBuffer;
+}
+
+char GetDisplayDimensionString(DisplayDimensions iDimension)
+{
+	char sBuffer[64];
+	switch (iDimension)
+	{
+		case Dimension_1D:
+			sBuffer = "Single line";
+		case Dimension_2D:
+			sBuffer = "Bottom rectangle only";
+		case Dimension_3D:
+			sBuffer = "3D box";
+	}
+	return sBuffer;
+}
+
+/**
+ * Sends the bottom part of a boxed beam effect to a list of players.
+ *
+ * Ported from eventscripts vecmath library.
+ *
+ * @param clients       An array of clients to show the box to.
+ * @param numClients    Number of players in the array.
+ * @param origin 		Origin/center of the box.
+ * @param mins			Min size Vector
+ * @param maxs			Max size Vector
+ * @param angles 		Angles used to rotate the box.
+ * @param modelIndex	Precached model index.
+ * @param haloIndex		Precached model index.
+ * @param startFrame	Initital frame to render.
+ * @param frameRate		Beam frame rate.
+ * @param life			Time duration of the beam.
+ * @param width			Initial beam width.
+ * @param endWidth		Final beam width.
+ * @param fadeLength	Beam fade time duration.
+ * @param amplitude		Beam amplitude.
+ * @param color			Color array (r, g, b, a).
+ * @param speed			Speed of the beam.
+ * @noreturn
+ */
+stock void DrawBottomRectangleRotatable(
+	int[] clients,
+	int numClients,
+	const float origin[3],
+	const float mins[3],
+	const float maxs[3],
+	const float angles[3],
+	int modelIndex,
+	int haloIndex,
+	int startFrame=0,
+	int frameRate=30,
+	float life=5.0,
+	float width=5.0,
+	float endWidth=5.0,
+	int fadeLength=2,
+	float amplitude=1.0,
+	const int color[4]={ 255, 0, 0, 255 },
+	int speed=0
+) {
+	// Create the corners of the bottom box.
+	float corners[4][3];
+	Array_Copy(mins, corners[0], 3);
+	Math_MakeVector(maxs[0], mins[1], mins[2], corners[1]);
+	Math_MakeVector(maxs[0], maxs[1], mins[2], corners[2]);
+	Math_MakeVector(mins[0], maxs[1], mins[2], corners[3]);
+
+	// Rotate all edges
+	for (int i = 0; i < sizeof(corners); i++) {
+		Math_RotateVector(corners[i], angles, corners[i]);
+	}
+
+	// Apply world offset (after rotation)
+	for (int i = 0; i < sizeof(corners); i++) {
+		AddVectors(origin, corners[i], corners[i]);
+	}
+
+    // Draw the bottom horizontal edges.
+	for (int i = 0; i < 4; i++) {
+		int j = ( i == 3 ? 0 : i+1 );
+		TE_SetupBeamPoints(corners[i], corners[j], modelIndex, haloIndex, startFrame, frameRate, life, width, endWidth, fadeLength, amplitude, color, speed);
+		TE_Send(clients, numClients);
+	}
 }

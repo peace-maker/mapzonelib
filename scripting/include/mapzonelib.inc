@@ -41,7 +41,18 @@ enum MenuHideFlag
 	HideFlag_None = 0,
 	HideFlag_Visibility = 1, // Hide the "Zone visibility" option from the edit menus.
 	HideFlag_TeamFilter = 2, // Hide the "Team filter" option from the edit menus.
-	HideFlag_Clipboard = 4   // Hide the Copy & Paste options from the menus.
+	HideFlag_Clipboard = 4,  // Hide the Copy & Paste options from the menus.
+	HideFlag_Dimensions = 8  // Hide the "Display dimensions" option from the edit menus.
+};
+
+/**
+ * How to draw the zone beams.
+ */
+enum DisplayDimensions
+{
+	Dimension_1D, // Only show a single line between the two points of the zone.
+	Dimension_2D, // Draw the lower rectangle of the box on the ground only.
+	Dimension_3D  // Draw a full 3D box defining the zone.
 };
 
 /**
@@ -181,6 +192,28 @@ native bool MapZone_SetZoneColor(const char[] group, const char[] zoneName, cons
  * @return             True if set, false if no zone group or zone with that name.
  */
 native bool MapZone_SetZoneVisibility(const char[] group, const char[] zoneName, ZoneVisibility iVisibility);
+
+/**
+ * Returns how many dimensions of the zone should be shown.
+ * @see DisplayDimensions
+ *
+ * @param group        The zone group name.
+ * @param zoneName     The zone or cluster name.
+ * @return             The amount of dimensions to draw the zone in (1D, 2D or 3D).
+ * @error              No zone group or zone/cluster with that name.
+ */
+native DisplayDimensions MapZone_GetZoneDisplayDimensions(const char[] group, const char[] zoneName);
+
+/**
+ * Set how many dimensions of the zone should be shown.
+ * @see DisplayDimensions
+ *
+ * @param group        The zone group name.
+ * @param zoneName     The zone or cluster name.
+ * @param iDimension   The amount of dimensions to draw the zone in (1D, 2D or 3D).
+ * @return             True if set, false if no zone group or zone with that name.
+ */
+native bool MapZone_SetZoneDisplayDimensions(const char[] group, const char[] zoneName, DisplayDimensions iDimension);
 
 /**
  * Returns the MenuHideFlags for a zone group.
@@ -452,6 +485,8 @@ public void __pl_mapzonelib_SetNTVOptional()
 	MarkNativeAsOptional("MapZone_SetZoneDefaultColor");
 	MarkNativeAsOptional("MapZone_SetZoneColor");
 	MarkNativeAsOptional("MapZone_SetZoneVisibility");
+	MarkNativeAsOptional("MapZone_GetZoneDisplayDimensions");
+	MarkNativeAsOptional("MapZone_SetZoneDisplayDimensions");
 	MarkNativeAsOptional("MapZone_GetGroupMenuHideFlags");
 	MarkNativeAsOptional("MapZone_SetGroupMenuHideFlags");
 	MarkNativeAsOptional("MapZone_GetZoneIndex");
