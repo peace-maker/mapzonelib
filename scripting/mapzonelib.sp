@@ -2663,7 +2663,8 @@ void DisplayClusterEditMenu(int client)
 	if (group[ZG_menuHideFlags] & HideFlag_Clipboard != HideFlag_Clipboard)
 		hMenu.AddItem("paste", "Paste zone from clipboard", (HasZoneInClipboard(client)?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED));
 
-	hMenu.AddItem("rename", "Rename");
+	if (group[ZG_menuHideFlags] & HideFlag_Rename != HideFlag_Rename)
+		hMenu.AddItem("rename", "Rename");
 	hMenu.AddItem("delete", "Delete");
 	
 	hMenu.AddItem("", "Zones:", ITEMDRAW_DISABLED);
@@ -2955,7 +2956,10 @@ void DisplayZoneEditMenu(int client)
 
 	if (group[ZG_menuHideFlags] & HideFlag_Clipboard != HideFlag_Clipboard)
 		hMenu.AddItem("copy", "Copy to clipboard");
-	hMenu.AddItem("rename", "Rename");
+
+	if (group[ZG_menuHideFlags] & HideFlag_Rename != HideFlag_Rename)
+		hMenu.AddItem("rename", "Rename");
+	
 	hMenu.AddItem("delete", "Delete");
 	
 	hMenu.Display(client, MENU_TIME_FOREVER);
