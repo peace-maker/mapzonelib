@@ -2821,21 +2821,18 @@ public int Menu_HandleClusterEdit(Menu menu, MenuAction action, int param1, int 
 		// Delete the cluster
 		else if(StrEqual(sInfo, "delete"))
 		{
-			char sBuffer[128];
-			Panel hPanel = new Panel();
-			Format(sBuffer, sizeof(sBuffer), "Do you really want to delete cluster \"%s\"?", zoneCluster[ZC_name]);
-			hPanel.SetTitle(sBuffer);
+			Menu hMenu = new Menu(Menu_HandleConfirmDeleteCluster);
+			hMenu.SetTitle("Do you really want to delete cluster \"%s\"?", zoneCluster[ZC_name]);
 			
 			if (group[ZG_menuHideFlags] & HideFlag_ClusterDeleteZones != HideFlag_ClusterDeleteZones)
-				hPanel.DrawItem("Yes, delete cluster and all contained zones");
+				hMenu.AddItem("deletezones", "Yes, delete cluster and all contained zones");
 
 			if (group[ZG_menuHideFlags] & HideFlag_ClusterDontDeleteZones != HideFlag_ClusterDontDeleteZones)
-				hPanel.DrawItem("Yes, delete cluster, but keep all contained zones");
+				hMenu.AddItem("keepzones", "Yes, delete cluster, but keep all contained zones");
 
-			hPanel.DrawItem("No, DON'T delete anything");
+			hMenu.AddItem("back", "No, DON'T delete anything");
 			
-			hPanel.Send(param1, Panel_HandleConfirmDeleteCluster, MENU_TIME_FOREVER);
-			delete hPanel;
+			hMenu.Display(param1, MENU_TIME_FOREVER);
 		}
 		else
 		{
@@ -2866,23 +2863,34 @@ public int Menu_HandleClusterEdit(Menu menu, MenuAction action, int param1, int 
 	}
 }
 
-public int Panel_HandleConfirmDeleteCluster(Menu menu, MenuAction action, int param1, int param2)
+public int Menu_HandleConfirmDeleteCluster(Menu menu, MenuAction action, int param1, int param2)
 {
-	if(action == MenuAction_Select)
+	if(action == MenuAction_End)
 	{
-		// Selected "No", go back.
-		if(param2 > 2)
+		delete menu;
+	}
+	else if(action == MenuAction_Select)
+	{
+		char sInfo[32];
+		menu.GetItem(param2, sInfo, sizeof(sInfo));
+
+		int group[ZoneGroup], zoneCluster[ZoneCluster];
+		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
+		GetZoneClusterByIndex(g_ClientMenuState[param1][CMS_cluster], group, zoneCluster);
+
+		if (StrEqual(sInfo, "back"))
 		{
 			DisplayClusterEditMenu(param1);
 			return;
 		}
-		
-		int group[ZoneGroup], zoneCluster[ZoneCluster];
-		GetGroupByIndex(g_ClientMenuState[param1][CMS_group], group);
-		GetZoneClusterByIndex(g_ClientMenuState[param1][CMS_cluster], group, zoneCluster);
-		
-		bool bDeleteZones = param2 == 1;
-		DeleteCluster(param1, group, zoneCluster, bDeleteZones);
+		else if (StrEqual(sInfo, "deletezones"))
+		{
+			DeleteCluster(param1, group, zoneCluster, true);
+		}
+		else if (StrEqual(sInfo, "keepzones"))
+		{
+			DeleteCluster(param1, group, zoneCluster, false);
+		}
 		
 		g_ClientMenuState[param1][CMS_cluster] = -1;
 		// Don't open our own menu if we're told to call the menu cancel callback.
