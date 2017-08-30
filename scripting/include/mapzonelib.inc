@@ -39,11 +39,15 @@ enum ZoneVisibility
 enum MenuHideFlag
 {
 	HideFlag_None = 0,
-	HideFlag_Visibility = 1,   // Hide the "Zone visibility" option from the edit menus.
-	HideFlag_TeamFilter = 2,   // Hide the "Team filter" option from the edit menus.
-	HideFlag_Clipboard = 4,    // Hide the Copy & Paste options from the menus.
-	HideFlag_Dimensions = 8,   // Hide the "Display dimensions" option from the edit menus.
-	HideFlag_Rename = 16       // Hide the "Rename" option from the edit menu.
+	HideFlag_Visibility = 1,               // Hide the "Zone visibility" option from the edit menus.
+	HideFlag_TeamFilter = 2,               // Hide the "Team filter" option from the edit menus.
+	HideFlag_Clipboard = 4,                // Hide the Copy & Paste options from the menus.
+	HideFlag_Dimensions = 8,               // Hide the "Display dimensions" option from the edit menus.
+	HideFlag_Rename = 16,                  // Hide the "Rename" option from the edit menu.
+
+	// If both cluster delete flags are set, the "Delete" menu option isn't shown at all.
+	HideFlag_ClusterDeleteZones = 32,      // Hide the "delete cluster and all contained zones" option from cluster delete menu.
+	HideFlag_ClusterDontDeleteZones = 64   // Hide the "delete cluster, but keep all contained zones" option from cluster delete menu.
 };
 
 /**

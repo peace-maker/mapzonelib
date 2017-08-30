@@ -2665,7 +2665,9 @@ void DisplayClusterEditMenu(int client)
 
 	if (group[ZG_menuHideFlags] & HideFlag_Rename != HideFlag_Rename)
 		hMenu.AddItem("rename", "Rename");
-	hMenu.AddItem("delete", "Delete");
+
+	if (group[ZG_menuHideFlags] & (HideFlag_ClusterDeleteZones|HideFlag_ClusterDontDeleteZones) != (HideFlag_ClusterDeleteZones|HideFlag_ClusterDontDeleteZones))
+		hMenu.AddItem("delete", "Delete");
 	
 	hMenu.AddItem("", "Zones:", ITEMDRAW_DISABLED);
 	int iNumZones = group[ZG_zones].Length;
@@ -2824,8 +2826,12 @@ public int Menu_HandleClusterEdit(Menu menu, MenuAction action, int param1, int 
 			Format(sBuffer, sizeof(sBuffer), "Do you really want to delete cluster \"%s\"?", zoneCluster[ZC_name]);
 			hPanel.SetTitle(sBuffer);
 			
-			hPanel.DrawItem("Yes, delete cluster and all contained zones");
-			hPanel.DrawItem("Yes, delete cluster, but keep all contained zones");
+			if (group[ZG_menuHideFlags] & HideFlag_ClusterDeleteZones != HideFlag_ClusterDeleteZones)
+				hPanel.DrawItem("Yes, delete cluster and all contained zones");
+
+			if (group[ZG_menuHideFlags] & HideFlag_ClusterDontDeleteZones != HideFlag_ClusterDontDeleteZones)
+				hPanel.DrawItem("Yes, delete cluster, but keep all contained zones");
+
 			hPanel.DrawItem("No, DON'T delete anything");
 			
 			hPanel.Send(param1, Panel_HandleConfirmDeleteCluster, MENU_TIME_FOREVER);
