@@ -116,6 +116,7 @@ ConVar g_hCVDefaultSnapToWalls;
 ConVar g_hCVPlayerCenterCollision;
 ConVar g_hCVDisableAimCapDistance;
 ConVar g_hCVBeamOffset;
+ConVar g_hCVShowZoneEditBeams;
 
 ConVar g_hCVDatabaseConfig;
 ConVar g_hCVTablePrefix;
@@ -128,11 +129,19 @@ Handle g_hfwdOnAddedToClusterForward;
 Handle g_hfwdOnRemovedFromClusterForward;
 Handle g_hfwdOnClientTeleportedToZoneForward;
 
+enum ShowEditBeams
+{
+	ShowBeams_PlayerOnly,
+	ShowBeams_Spectators,
+	ShowBeams_Everyone
+};
+
 // Displaying of zones using laser beams
 Handle g_hShowZonesTimer;
 int g_iLaserMaterial = -1;
 int g_iHaloMaterial = -1;
 int g_iGlowSprite = -1;
+ShowEditBeams g_iShowZoneEditBeamsTo;
 
 // Central array to save all information about zones
 ArrayList g_hZoneGroups;
@@ -231,12 +240,15 @@ public void OnPluginStart()
 	g_hCVBeamOffset = CreateConVar("sm_mapzone_beam_offset", "0", "Add this offset to the displayed beams to e.g. make them look smaller than the actual trigger is to keep them out of walls.");
 	g_hCVDatabaseConfig = CreateConVar("sm_mapzone_database_config", "", "The database section in databases.cfg to connect to. Optionally save and load zones from that database. Only used when this option is set. Will still save the zones to local files too as backup if database is unavailable.");
 	g_hCVTablePrefix = CreateConVar("sm_mapzone_database_prefix", "zones_", "Optional prefix of the database tables. e.g. \"zone_\"");
+	g_hCVShowZoneEditBeams = CreateConVar("sm_mapzone_show_zone_edit_beams", "0", "Show the beams to other players too while adding/editing a zone? 0 = editing player only, 1 = spectators too, 2 = anyone", _, true, 0.0, true, 2.0);
 	
 	AutoExecConfig(true, "plugin.mapzonelib");
 	
 	g_hCVShowZonesDefault.AddChangeHook(ConVar_OnDebugChanged);
 	g_hCVPlayerCenterCollision.AddChangeHook(ConVar_OnPlayerCenterCollisionChanged);
 	g_hCVDisableAimCapDistance.AddChangeHook(ConVar_OnDisableAimCapDistanceChanged);
+	g_hCVShowZoneEditBeams.AddChangeHook(ConVar_OnShowZoneEditBeamsChanged);
+	g_iShowZoneEditBeamsTo = view_as<ShowEditBeams>(g_hCVShowZoneEditBeams.IntValue);
 	
 	HookEvent("round_start", Event_OnRoundStart);
 	HookEvent("player_spawn", Event_OnPlayerSpawn);
@@ -754,6 +766,11 @@ public void ConVar_OnDisableAimCapDistanceChanged(ConVar convar, const char[] ol
 	// Reset the aim cap for all players, since they won't be able to change or reset it anymore.
 	for(int i=1;i<=MaxClients;i++)
 		g_ClientMenuState[i][CMS_aimCapDistance] = -1.0;
+}
+
+public void ConVar_OnShowZoneEditBeamsChanged(ConVar convar, const char[] oldValue, const char[] newValue)
+{
+	g_iShowZoneEditBeamsTo = view_as<ShowEditBeams>(convar.IntValue);
 }
 
 /**
@@ -2054,7 +2071,6 @@ public Action Timer_ShowZones(Handle timer)
 		}
 	}
 	
-	
 	for(int i=1;i<=MaxClients;i++)
 	{
 		if(g_ClientMenuState[i][CMS_editPosition]
@@ -2064,7 +2080,10 @@ public Action Timer_ShowZones(Handle timer)
 			// Currently pasting a zone. Wait until user gives a name before showing anything.
 			if(g_ClientMenuState[i][CMS_zone] == -1 && g_ClientMenuState[i][CMS_editCenter])
 				continue;
-				
+			
+			// See if there are any spectators to show this to too.
+			FillClientSpectators(i, iClients, iNumClients);
+
 			GetGroupByIndex(g_ClientMenuState[i][CMS_group], group);
 			GetZoneByIndex(g_ClientMenuState[i][CMS_zone], group, zoneData);
 			
@@ -2108,12 +2127,12 @@ public Action Timer_ShowZones(Handle timer)
 					AddVectors(vSecondPoint, fPos, vSecondPoint);
 					TE_SetupGlowSprite(vSecondPoint, g_iGlowSprite, 2.0, 1.0, 100);
 				}
-				TE_SendToClient(i);
+				TE_Send(iClients, iNumClients);
 			}
 			
 			// Draw the zone
-			Effect_DrawBeamBoxRotatableToClient(i, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
-			Effect_DrawAxisOfRotationToClient(i, fPos, fAngles, view_as<float>({20.0,20.0,20.0}), g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, 0);
+			Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
+			Effect_DrawAxisOfRotation(iClients, iNumClients, fPos, fAngles, view_as<float>({20.0,20.0,20.0}), g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, 0);
 		}
 	}
 	
@@ -2126,6 +2145,9 @@ public Action Timer_ShowZoneWhileAdding(Handle timer, any userid)
 	if (!client)
 		return Plugin_Stop;
 	
+	int[] iClients = new int[MaxClients];
+	int iNumClients;
+
 	// Don't show temporary stuff anymore when done with both corners.
 	if(g_ClientMenuState[client][CMS_editState] == ZES_name)
 	{
@@ -2136,7 +2158,9 @@ public Action Timer_ShowZoneWhileAdding(Handle timer, any userid)
 			Array_Copy(g_ClientMenuState[client][CMS_first], fFirstPoint, 3);
 			Array_Copy(g_ClientMenuState[client][CMS_second], fSecondPoint, 3);
 			
-			Effect_DrawBeamBoxToClient(client, fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
+			// See if there are any spectators to show this to too.
+			FillClientSpectators(client, iClients, iNumClients);
+			Effect_DrawBeamBox(iClients, iNumClients, fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
 		}
 		return Plugin_Continue;
 	}
@@ -2150,11 +2174,14 @@ public Action Timer_ShowZoneWhileAdding(Handle timer, any userid)
 	if (!GetClientZoneAimPosition(client, fAimPosition, fUnsnappedAimPosition))
 		return Plugin_Continue;
 	
+	// See if there are any spectators to show this to too.
+	FillClientSpectators(client, iClients, iNumClients);
+
 	// Show an indicator on where the client aims at.
 	if (g_ClientMenuState[client][CMS_previewMode] == ZPM_aim)
 	{
 		TE_SetupGlowSprite(fAimPosition, g_iGlowSprite, 0.1, 0.1, 150);
-		TE_SendToClient(client);
+		TE_Send(iClients, iNumClients);
 	}
 	
 	// Get the snapped and unsnapped target positions now.
@@ -2173,7 +2200,7 @@ public Action Timer_ShowZoneWhileAdding(Handle timer, any userid)
 			SnapToGrid(client, fUnsnappedTargetPosition, fTargetPosition, fGroundNormal);
 		
 		TE_SetupGlowSprite(fTargetPosition, g_iGlowSprite, 0.1, 0.7, 150);
-		TE_SendToClient(client);
+		TE_Send(iClients, iNumClients);
 		
 		// Put the start position a little bit higher and behind the player.
 		// That way you still see the beam, even if it's right below you.
@@ -2189,7 +2216,10 @@ public Action Timer_ShowZoneWhileAdding(Handle timer, any userid)
 	// Show a beam from player position to snapped grid corner.
 	if ((g_ClientMenuState[client][CMS_snapToGrid] || g_ClientMenuState[client][CMS_snapToWall] || g_ClientMenuState[client][CMS_previewMode] == ZPM_feet)
 	&& IsClientEditingZonePosition(client))
-		ShowGridSnapBeamToClient(client, fUnsnappedTargetPosition, fTargetPosition);
+	{
+		TE_SetupBeamPoints(fUnsnappedTargetPosition, fTargetPosition, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 1.0, 1.0, 2, 1.0, {0,255,0,255}, 0);
+		TE_Send(iClients, iNumClients);
+	}
 	
 	// Preview the zone in realtime while editing.
 	if (g_ClientMenuState[client][CMS_editCenter]
@@ -2210,7 +2240,7 @@ public Action Timer_ShowZoneWhileAdding(Handle timer, any userid)
 			Array_Copy(zoneData[ZD_mins], fMins, 3);
 			Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
 			
-			Effect_DrawBeamBoxRotatableToClient(client, fCenter, fMins, fMaxs, fRotation, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
+			Effect_DrawBeamBoxRotatable(iClients, iNumClients, fCenter, fMins, fMaxs, fRotation, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
 			return Plugin_Continue;
 		}
 		
@@ -2232,16 +2262,10 @@ public Action Timer_ShowZoneWhileAdding(Handle timer, any userid)
 		}
 		
 		// TODO: When editing a zone, apply the rotation again.
-		Effect_DrawBeamBoxToClient(client, fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
+		Effect_DrawBeamBox(iClients, iNumClients, fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
 	}
 	
 	return Plugin_Continue;
-}
-
-void ShowGridSnapBeamToClient(int client, float fFirstPoint[3], float fSecondPoint[3])
-{
-	TE_SetupBeamPoints(fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 1.0, 1.0, 2, 1.0, {0,255,0,255}, 0);
-	TE_SendToClient(client);
 }
 
 /**
@@ -6299,5 +6323,45 @@ stock void DrawBottomRectangleRotatable(
 		int j = ( i == 3 ? 0 : i+1 );
 		TE_SetupBeamPoints(corners[i], corners[j], modelIndex, haloIndex, startFrame, frameRate, life, width, endWidth, fadeLength, amplitude, color, speed);
 		TE_Send(clients, numClients);
+	}
+}
+
+void FillClientSpectators(int client, int[] iClients, int &iNumClients)
+{
+	iNumClients = 0;
+	// Always add the client itself.
+	iClients[iNumClients++] = client;
+
+	// Only that one guy. That's it.
+	if (g_iShowZoneEditBeamsTo == ShowBeams_PlayerOnly)
+		return;
+
+	// See if there are any spectators of that client.
+	Obs_Mode iMode;
+	for (int i=1; i<=MaxClients; i++)
+	{
+		if (client == i)
+			continue;
+		
+		if (!IsClientInGame(i) || IsFakeClient(i))
+			continue;
+
+		// Show to spectators too.
+		if (g_iShowZoneEditBeamsTo == ShowBeams_Spectators)
+		{
+			if (IsPlayerAlive(i) || !IsClientObserver(i))
+				continue;
+
+			// Not spectating this player.
+			if (Client_GetObserverTarget(i) != client)
+				continue;
+
+			// Not watching that one player
+			iMode = Client_GetObserverMode(i);
+			if (iMode != OBS_MODE_IN_EYE && iMode != OBS_MODE_CHASE)
+				continue;
+		}
+
+		iClients[iNumClients++] = i;
 	}
 }
