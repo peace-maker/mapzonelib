@@ -5626,10 +5626,41 @@ bool SnapToNearWall(int client, float fPoint[3], float fSnappedPoint[3], float f
 	NormalizeVector(fTargetSurfaceV, fTargetSurfaceV);
 
 	// Search around the point on the surface's normal in a circle for nearby walls.
-	float fCirclePoint[3], fCircleAngles[3], fWallPosition[3];
-	float fWallDistance, fClosestWallPosition[3];
+	float fClosestWallPosition[3], fClosestWallNormal[3];
+	float fSecondClosestWallPosition[3], fSecondClosestWallNormal[3];
+	bool bWallIsNear = FindNearestWall(fTraceStart, fTargetSurfaceU, fTargetSurfaceV, fSecondClosestWallNormal, g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]], fClosestWallPosition, fClosestWallNormal);
+	if (bWallIsNear)
+	{
+		// See if there is a differrent wall near the point too.
+		bool bAnotherWallIsNear = FindNearestWall(fTraceStart, fTargetSurfaceU, fTargetSurfaceV, fClosestWallNormal, g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]], fSecondClosestWallPosition, fSecondClosestWallNormal);
+		if (bAnotherWallIsNear)
+		{
+			// Snap to the corner between the two walls.
+			float fTowardsOtherWall[3];
+			GetVectorCrossProduct(fTargetNormal, fClosestWallNormal, fTowardsOtherWall);
+			NormalizeVector(fTowardsOtherWall, fTowardsOtherWall);
+
+			Math_GetLinePlaneIntersection(fClosestWallPosition, fTowardsOtherWall, fSecondClosestWallPosition, fSecondClosestWallNormal, fClosestWallPosition);
+		}
+	}
+
+	// No wall near the current point. Don't snap.
+	if (!bWallIsNear)
+		return false;
+
+	// Move target point back down on to the surface.
+	SubtractVectors(fClosestWallPosition, fTargetNormal, fSnappedPoint);
+	return true;
+}
+
+// Search around the point on the surface's normal in a circle for nearby walls.
+// Ignore walls with a certain plane normal, so we can find other near walls and snap to the corner between them.
+bool FindNearestWall(const float fTraceStart[3], const float fTargetSurfaceU[3], const float fTargetSurfaceV[3], float fAvoidNormal[3], float fStepsize, float fClosestWallPosition[3], float fClosestWallNormal[3])
+{
+	float fCirclePoint[3], fCircleAngles[3], fWallPosition[3], fWallNormal[3];
+	float fWallDistance;
 	// Search for a wall in the radius of the step size.
-	float fNearestWallDistance = g_fStepsizes[g_ClientMenuState[client][CMS_stepSizeIndex]];
+	float fNearestWallDistance = fStepsize;
 	bool bWallIsNear = false;
 	for (float fOffset = 0.0; fOffset < 2.0*FLOAT_PI; fOffset += 0.1)
 	{
@@ -5661,19 +5692,24 @@ bool SnapToNearWall(int client, float fPoint[3], float fSnappedPoint[3], float f
 		fWallDistance = GetVectorDistance(fTraceStart, fWallPosition);
 		if (fWallDistance < fNearestWallDistance)
 		{
+			TR_GetPlaneNormal(INVALID_HANDLE, fWallNormal);
+			NormalizeVector(fWallNormal, fWallNormal);
+
+			// See if we're trying to avoid a wall with a certain normal.
+			if (GetVectorLength(fAvoidNormal, false) > 0.0)
+			{
+				// Ignore the wall we already know.
+				if (FloatAbs(GetVectorDotProduct(fWallNormal, fAvoidNormal)) > 0.9)
+					continue;
+			}
+
 			fNearestWallDistance = fWallDistance;
 			fClosestWallPosition = fWallPosition;
+			fClosestWallNormal = fWallNormal;
 			bWallIsNear = true;
 		}
 	}
-
-	// No wall near the current point. Don't snap.
-	if (!bWallIsNear)
-		return false;
-
-	// Move target point back down on to the surface.
-	SubtractVectors(fClosestWallPosition, fTargetNormal, fSnappedPoint);
-	return true;
+	return bWallIsNear;
 }
 
 // Get ground position and normal for the position the player is standing on.
