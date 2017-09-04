@@ -381,6 +381,38 @@ stock bool MapZone_IsZonePartOfCluster(const char[] group, const char[] zoneName
 native bool MapZone_SetZoneName(const char[] group, const char[] sOldName, const char[] sNewName);
 
 /**
+ * Swap the names of two zones/clusters.
+ *
+ * @param group        The zone group name.
+ * @param sFirstName   The name of the first zone or cluster.
+ * @param sSecondName  The name of the second zone or cluster.
+ * @return             True if the names were swapped, false otherwise.
+ */
+stock bool MapZone_SwapZoneNames(const char[] group, const char[] sFirstName, const char[] sSecondName)
+{
+	// Make sure the zones itself exist for the swap.
+	if (!MapZone_ZoneExists(group, sFirstName) || !MapZone_ZoneExists(group, sSecondName))
+		return false;
+
+	// Find a free swap name.
+	int iNum;
+	char sSwapName[MAX_ZONE_NAME];
+	do
+	{
+		Format(sSwapName, sizeof(sSwapName), "xyz__%d", iNum++);
+	} while (MapZone_ZoneExists(group, sSwapName));
+
+	// Swap the names of the two zones.
+	if (!MapZone_SetZoneName(group, sFirstName, sSwapName))
+		return false;
+	if (!MapZone_SetZoneName(group, sSecondName, sFirstName))
+		return false;
+	if (!MapZone_SetZoneName(group, sSwapName, sSecondName))
+		return false;
+	return true;
+}
+
+/**
  * Get the center position of a zone.
  *
  * @param group     The zone group name.
