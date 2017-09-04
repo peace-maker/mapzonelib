@@ -118,6 +118,10 @@ ConVar g_hCVDisableAimCapDistance;
 ConVar g_hCVBeamOffset;
 ConVar g_hCVShowZoneEditBeams;
 
+ConVar g_hCVBeamMaterial;
+ConVar g_hCVHaloMaterial;
+ConVar g_hCVGlowMaterial;
+
 ConVar g_hCVDatabaseConfig;
 ConVar g_hCVTablePrefix;
 
@@ -242,6 +246,10 @@ public void OnPluginStart()
 	g_hCVTablePrefix = CreateConVar("sm_mapzone_database_prefix", "zones_", "Optional prefix of the database tables. e.g. \"zone_\"");
 	g_hCVShowZoneEditBeams = CreateConVar("sm_mapzone_show_zone_edit_beams", "0", "Show the beams to other players too while adding/editing a zone? 0 = editing player only, 1 = spectators too, 2 = anyone", _, true, 0.0, true, 2.0);
 	
+	g_hCVBeamMaterial = CreateConVar("sm_mapzone_beam_material", "SpriteBeam", "The material to use for zone beams. Can either be a key in the funcommands.games.txt SourceMod stock gamedata file or the path to the texture (excluding \"materials/\"). Falls back to the \"SpriteBeam\" material in funcommands.games if the file is missing.");
+	g_hCVHaloMaterial = CreateConVar("sm_mapzone_halo_material", "SpriteHalo", "The material to use for zone beam halos. Can either be a key in the funcommands.games.txt SourceMod stock gamedata file or the path to the texture (excluding \"materials/\"). Falls back to the \"SpriteHalo\" material in funcommands.games if the file is missing.");
+	g_hCVGlowMaterial = CreateConVar("sm_mapzone_glow_material", "SpriteGlow", "The material to use for corner glows while editing zones. Can either be a key in the funcommands.games.txt SourceMod stock gamedata file or the path to the texture (excluding \"materials/\"). Falls back to the \"SpriteGlow\" material in funcommands.games if the file is missing.");
+
 	AutoExecConfig(true, "plugin.mapzonelib");
 	
 	g_hCVShowZonesDefault.AddChangeHook(ConVar_OnDebugChanged);
@@ -297,6 +305,28 @@ public void OnConfigsExecuted()
 	g_hCVDatabaseConfig.GetString(sDatabase, sizeof(sDatabase));
 	g_hCVTablePrefix.GetString(g_sTablePrefix, sizeof(g_sTablePrefix));
 	
+	// Cache the beam materials now that the changed convar values are loaded.
+	// Don't want to redefine the default sprites.
+	// Borrow them for different games from sm's default funcommands plugin.
+	Handle hGameConfig = LoadGameConfigFile("funcommands.games");
+	if (!hGameConfig)
+	{
+		SetFailState("Unable to load game config funcommands.games from stock sourcemod plugin for beam materials.");
+		return;
+	}
+
+	char sCustomMaterial[PLATFORM_MAX_PATH];
+	g_hCVBeamMaterial.GetString(sCustomMaterial, sizeof(sCustomMaterial));
+	g_iLaserMaterial = PrecacheCustomMaterial(hGameConfig, sCustomMaterial, "SpriteBeam");
+
+	g_hCVHaloMaterial.GetString(sCustomMaterial, sizeof(sCustomMaterial));
+	g_iHaloMaterial = PrecacheCustomMaterial(hGameConfig, sCustomMaterial, "SpriteHalo");
+	
+	g_hCVGlowMaterial.GetString(sCustomMaterial, sizeof(sCustomMaterial));
+	g_iGlowSprite = PrecacheCustomMaterial(hGameConfig, sCustomMaterial, "SpriteGlow");
+	
+	delete hGameConfig;
+
 	// Remove all zones of the old map
 	ClearZonesInGroups();
 	
@@ -328,34 +358,7 @@ public void OnMapStart()
 {
 	PrecacheModel("models/error.mdl", true);
 
-	// Don't want to redefine the default sprites.
-	// Borrow them for different games from sm's default funcommands plugin.
-	Handle hGameConfig = LoadGameConfigFile("funcommands.games");
-	if (!hGameConfig)
-	{
-		SetFailState("Unable to load game config funcommands.games from stock sourcemod plugin for beam materials.");
-		return;
-	}
-	
 	GetCurrentMap(g_sCurrentMap, sizeof(g_sCurrentMap));
-	
-	char sBuffer[PLATFORM_MAX_PATH];
-	if (GameConfGetKeyValue(hGameConfig, "SpriteBeam", sBuffer, sizeof(sBuffer)) && sBuffer[0])
-	{
-		g_iLaserMaterial = PrecacheModel(sBuffer, true);
-	}
-	
-	if (GameConfGetKeyValue(hGameConfig, "SpriteHalo", sBuffer, sizeof(sBuffer)) && sBuffer[0])
-	{
-		g_iHaloMaterial = PrecacheModel(sBuffer, true);
-	}
-	
-	if (GameConfGetKeyValue(hGameConfig, "SpriteGlow", sBuffer, sizeof(sBuffer)) && sBuffer[0])
-	{
-		g_iGlowSprite = PrecacheModel(sBuffer, true);
-	}
-	
-	delete hGameConfig;
 	
 	// Remove all zones of the old map
 	ClearZonesInGroups();
@@ -4317,6 +4320,36 @@ void AddCustomKeyValues(KeyValues hKV, StringMap hCustomKV)
 	
 	delete hTrieSnapshot;
 	hKV.GoBack();
+}
+
+int PrecacheCustomMaterial(Handle hGameConfig, const char sCustomMaterial[PLATFORM_MAX_PATH], const char[] sFallbackKey)
+{
+	char sBuffer[PLATFORM_MAX_PATH], sPath[PLATFORM_MAX_PATH];
+	// See if it's a key in the gamedata file.
+	if (!GameConfGetKeyValue(hGameConfig, sCustomMaterial, sBuffer, sizeof(sBuffer)) || !sBuffer[0])
+	{
+		// See if the material file is there.
+		Format(sPath, sizeof(sPath), "materials/%s", sCustomMaterial);
+		if (FileExists(sPath, true))
+		{
+			// This is custom file not included in the game.
+			// Need clients to download it.
+			if (FileExists(sPath, false))
+			{
+				AddFileToDownloadsTable(sPath);
+			}
+			sBuffer = sCustomMaterial;
+		}
+		// Fall back to SpriteBeam default.
+		else if (!GameConfGetKeyValue(hGameConfig, sFallbackKey, sBuffer, sizeof(sBuffer)))
+		{
+			sBuffer[0] = 0;
+		}
+	}
+
+	if (sBuffer[0])
+		return PrecacheModel(sBuffer, true);
+	return -1;
 }
 
 /**
