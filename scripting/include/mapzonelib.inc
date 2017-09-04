@@ -291,10 +291,9 @@ native int MapZone_GetZoneIndex(const char[] group, const char[] zoneName, MapZo
  * @param mapZoneType  The type of the index as returned by MapZone_GetZoneIndex.
  * @param zoneName     Buffer to store the zone or cluster name in.
  * @param maxlen       Size of the buffer.
- * @return             True if name was copied, false if zone or cluster got deleted.
- * @error              Invalid group name or invalid index for that type.
+ * @error              Invalid group name, invalid index for that type or zone or cluster got deleted.
  */
-native bool MapZone_GetZoneNameByIndex(const char[] group, int zoneIndex, MapZoneType mapZoneType, char[] zoneName, int maxlen);
+native void MapZone_GetZoneNameByIndex(const char[] group, int zoneIndex, MapZoneType mapZoneType, char[] zoneName, int maxlen);
 
 /**
  * Get an adt_array of zone (and cluster) names of this group.

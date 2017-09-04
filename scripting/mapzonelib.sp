@@ -928,7 +928,7 @@ public int Native_ShowZoneEditMenu(Handle plugin, int numParams)
 	}
 	else
 	{
-		ThrowNativeError(SP_ERROR_NATIVE, "Invalid zone or cluster name \"%s\"", sName);
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid zone or cluster name \"%s\"", sZoneName);
 		return;
 	}
 	
@@ -1435,7 +1435,10 @@ public int Native_GetZoneNameByIndex(Handle plugin, int numParams)
 			int zoneData[ZoneData];
 			GetZoneByIndex(iZoneIndex, group, zoneData);
 			if (zoneData[ZD_deleted])
+			{
+				ThrowNativeError(SP_ERROR_NATIVE, "Zone with index %d is deleted.", iZoneIndex);
 				return false;
+			}
 			
 			SetNativeString(4, zoneData[ZD_name], iMaxlen);
 		}
@@ -1450,7 +1453,10 @@ public int Native_GetZoneNameByIndex(Handle plugin, int numParams)
 			int zoneCluster[ZoneCluster];
 			GetZoneClusterByIndex(iZoneIndex, group, zoneCluster);
 			if (zoneCluster[ZC_deleted])
+			{
+				ThrowNativeError(SP_ERROR_NATIVE, "Cluster with index %d is deleted.", iZoneIndex);
 				return false;
+			}
 			
 			SetNativeString(4, zoneCluster[ZC_name], iMaxlen);
 		}
