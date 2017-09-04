@@ -1654,6 +1654,13 @@ public int Native_SetZoneName(Handle plugin, int numParams)
 		ThrowNativeError(SP_ERROR_NATIVE, "No zone or cluster with name \"%s\" in group \"%s\".", sCurrentName, sGroupName);
 		return false;
 	}
+
+	// Make sure they're giving a name.
+	if (!sNewName[0])
+	{
+		ThrowNativeError(SP_ERROR_NATIVE, "Zone name can not be empty.");
+		return false;
+	}
 	
 	// Make sure there is no other zone named by the new name.
 	if(ZoneExistsWithName(group, sNewName) || ClusterExistsWithName(group, sNewName))
