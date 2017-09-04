@@ -5721,8 +5721,11 @@ void SnapToGrid(int client, float fPoint[3], float fSnappedPoint[3], float fTarg
 	
 	// Snap to walls!
 	// See if the grid snapped behind the target point.
+	float fInitialNormal[3];
+	fInitialNormal = fTargetNormal;
 	if (!Math_VectorsEqual(fTargetNormal, view_as<float>({0.0,0.0,0.0})))
 	{
+		bool bWasBehindWall;
 		float fSnappedDirection[3];
 		MakeVectorFromPoints(fPoint, fSnappedPoint, fSnappedDirection);
 		NormalizeVector(fSnappedDirection, fSnappedDirection);
@@ -5735,16 +5738,17 @@ void SnapToGrid(int client, float fPoint[3], float fSnappedPoint[3], float fTarg
 				// And a bit further.
 				ScaleVector(fTargetNormal, 0.01);
 				AddVectors(fSnappedPoint, fTargetNormal, fSnappedPoint);
+				bWasBehindWall = true;
 			}
 		}
 		
 		bool bChanged;
 		int iDimension;
+		float fAngles[3];
 		do
 		{
 			bChanged = false;
 			// See if we're still behind some other wall after moving the point toward the normal again.
-			float fAngles[3];
 			MakeVectorFromPoints(fPoint, fSnappedPoint, fSnappedDirection);
 			NormalizeVector(fSnappedDirection, fSnappedDirection);
 			GetVectorAngles(fSnappedDirection, fAngles);
@@ -5779,11 +5783,35 @@ void SnapToGrid(int client, float fPoint[3], float fSnappedPoint[3], float fTarg
 					AddVectors(fSnappedPoint, fTargetNormal, fSnappedPoint);
 					bChanged = true;
 					iDimension++;
+					bWasBehindWall = true;
 				}
 			}
 		}
 		// Only adjust for up to 3 corrections. Ignore if we're outside the world somehow.
 		while (bChanged && iDimension < 3);
+
+		// The grid position was valid inside the player's view.
+		// See if we're really close to the surface right now.
+		if (!bWasBehindWall)
+		{
+			// Trace towards the surface the player was aiming at.
+			NegateVector(fInitialNormal);
+			GetVectorAngles(fInitialNormal, fAngles);
+			TR_TraceRayFilter(fSnappedPoint, fAngles, MASK_PLAYERSOLID, RayType_Infinite, RayFilter_DontHitPlayers);
+			if (!TR_DidHit())
+				return;
+
+			float fSurfaceOrigin[3];
+			TR_GetEndPosition(fSurfaceOrigin);
+			// If the snapped point is really close to the surface, snap it to the surface instead of the grid.
+			if (GetVectorDistance(fSnappedPoint, fSurfaceOrigin, false) < 35.0)
+			{
+				// Keep it a little bit above the ground.
+				MakeVectorFromPoints(fSnappedPoint, fSurfaceOrigin, fInitialNormal);
+				ScaleVector(fInitialNormal, 0.99);
+				AddVectors(fSnappedPoint, fInitialNormal, fSnappedPoint);
+			}
+		}
 	}
 }
 
