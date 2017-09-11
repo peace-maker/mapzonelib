@@ -121,6 +121,9 @@ ConVar g_hCVShowZoneEditBeams;
 ConVar g_hCVBeamMaterial;
 ConVar g_hCVHaloMaterial;
 ConVar g_hCVGlowMaterial;
+ConVar g_hCVBeamWidth;
+ConVar g_hCVBeamAmplitude;
+ConVar g_hCVBeamSpeed;
 
 ConVar g_hCVDatabaseConfig;
 ConVar g_hCVTablePrefix;
@@ -146,6 +149,9 @@ int g_iLaserMaterial = -1;
 int g_iHaloMaterial = -1;
 int g_iGlowSprite = -1;
 ShowEditBeams g_iShowZoneEditBeamsTo;
+float g_fBeamWidth;
+float g_fBeamAmplitude;
+int g_iBeamSpeed;
 
 // Central array to save all information about zones
 ArrayList g_hZoneGroups;
@@ -249,6 +255,9 @@ public void OnPluginStart()
 	g_hCVBeamMaterial = CreateConVar("sm_mapzone_beam_material", "SpriteBeam", "The material to use for zone beams. Can either be a key in the funcommands.games.txt SourceMod stock gamedata file or the path to the texture (excluding \"materials/\"). Falls back to the \"SpriteBeam\" material in funcommands.games if the file is missing.");
 	g_hCVHaloMaterial = CreateConVar("sm_mapzone_halo_material", "SpriteHalo", "The material to use for zone beam halos. Can either be a key in the funcommands.games.txt SourceMod stock gamedata file or the path to the texture (excluding \"materials/\"). Falls back to the \"SpriteHalo\" material in funcommands.games if the file is missing.");
 	g_hCVGlowMaterial = CreateConVar("sm_mapzone_glow_material", "SpriteGlow", "The material to use for corner glows while editing zones. Can either be a key in the funcommands.games.txt SourceMod stock gamedata file or the path to the texture (excluding \"materials/\"). Falls back to the \"SpriteGlow\" material in funcommands.games if the file is missing.");
+	g_hCVBeamWidth = CreateConVar("sm_mapzone_beam_width", "2.0", "Start and end width of the zone beams.");
+	g_hCVBeamAmplitude = CreateConVar("sm_mapzone_beam_amplitude", "1.0", "Beam amplitude of the zone beams.");
+	g_hCVBeamSpeed = CreateConVar("sm_mapzone_beam_speed", "5", "Material scrolling speed of zone beams.");
 
 	AutoExecConfig(true, "plugin.mapzonelib");
 	
@@ -257,6 +266,13 @@ public void OnPluginStart()
 	g_hCVDisableAimCapDistance.AddChangeHook(ConVar_OnDisableAimCapDistanceChanged);
 	g_hCVShowZoneEditBeams.AddChangeHook(ConVar_OnShowZoneEditBeamsChanged);
 	g_iShowZoneEditBeamsTo = view_as<ShowEditBeams>(g_hCVShowZoneEditBeams.IntValue);
+
+	g_fBeamWidth = g_hCVBeamWidth.FloatValue;
+	g_hCVBeamWidth.AddChangeHook(ConVar_OnBeamSettingChanged);
+	g_fBeamAmplitude = g_hCVBeamAmplitude.FloatValue;
+	g_hCVBeamAmplitude.AddChangeHook(ConVar_OnBeamSettingChanged);
+	g_iBeamSpeed = g_hCVBeamSpeed.IntValue;
+	g_hCVBeamSpeed.AddChangeHook(ConVar_OnBeamSettingChanged);
 	
 	HookEvent("round_start", Event_OnRoundStart);
 	HookEvent("player_spawn", Event_OnPlayerSpawn);
@@ -304,6 +320,11 @@ public void OnConfigsExecuted()
 	char sDatabase[256];
 	g_hCVDatabaseConfig.GetString(sDatabase, sizeof(sDatabase));
 	g_hCVTablePrefix.GetString(g_sTablePrefix, sizeof(g_sTablePrefix));
+
+	// Cache beam settings
+	g_fBeamWidth = g_hCVBeamWidth.FloatValue;
+	g_fBeamAmplitude = g_hCVBeamAmplitude.FloatValue;
+	g_iBeamSpeed = g_hCVBeamSpeed.IntValue;
 	
 	// Cache the beam materials now that the changed convar values are loaded.
 	// Don't want to redefine the default sprites.
@@ -701,7 +722,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 				Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
 				Array_Copy(g_ClientMenuState[client][CMS_rotation], fAngles, 3);
 				
-				Effect_DrawBeamBoxRotatableToClient(client, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
+				Effect_DrawBeamBoxRotatableToClient(client, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, g_fBeamWidth, g_fBeamWidth, 2, g_fBeamAmplitude, {0,0,255,255}, 0);
 				Effect_DrawAxisOfRotationToClient(client, fPos, fAngles, view_as<float>({20.0,20.0,20.0}), g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, 0);
 			}
 		}
@@ -774,6 +795,16 @@ public void ConVar_OnDisableAimCapDistanceChanged(ConVar convar, const char[] ol
 public void ConVar_OnShowZoneEditBeamsChanged(ConVar convar, const char[] oldValue, const char[] newValue)
 {
 	g_iShowZoneEditBeamsTo = view_as<ShowEditBeams>(convar.IntValue);
+}
+
+public void ConVar_OnBeamSettingChanged(ConVar convar, const char[] oldValue, const char[] newValue)
+{
+	if (convar == g_hCVBeamWidth)
+		g_fBeamWidth = g_hCVBeamWidth.FloatValue;
+	else if (convar == g_hCVBeamAmplitude)
+		g_fBeamAmplitude = g_hCVBeamAmplitude.FloatValue;
+	else if (convar == g_hCVBeamSpeed)
+		g_iBeamSpeed = g_hCVBeamSpeed.IntValue;
 }
 
 /**
@@ -2072,16 +2103,16 @@ public Action Timer_ShowZones(Handle timer)
 					Math_RotateVector(fMaxs, fAngles, vSecondPoint);
 					AddVectors(vSecondPoint, fPos, vSecondPoint);
 
-					TE_SetupBeamPoints(vFirstPoint, vSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, iColor, 5);
+					TE_SetupBeamPoints(vFirstPoint, vSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, g_fBeamWidth, g_fBeamWidth, 2, g_fBeamAmplitude, iColor, g_iBeamSpeed);
 					TE_Send(iClients, iNumClients);
 				}
 				case Dimension_2D:
 				{
-					DrawBottomRectangleRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, iColor, 5);
+					DrawBottomRectangleRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, g_fBeamWidth, g_fBeamWidth, 2, g_fBeamAmplitude, iColor, g_iBeamSpeed);
 				}
 				case Dimension_3D:
 				{
-					Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, iColor, 5);
+					Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, g_fBeamWidth, g_fBeamWidth, 2, g_fBeamAmplitude, iColor, g_iBeamSpeed);
 				}
 			}
 		}
@@ -2147,7 +2178,7 @@ public Action Timer_ShowZones(Handle timer)
 			}
 			
 			// Draw the zone
-			Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
+			Effect_DrawBeamBoxRotatable(iClients, iNumClients, fPos, fMins, fMaxs, fAngles, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, g_fBeamWidth, g_fBeamWidth, 2, g_fBeamAmplitude, {0,0,255,255}, 0);
 			Effect_DrawAxisOfRotation(iClients, iNumClients, fPos, fAngles, view_as<float>({20.0,20.0,20.0}), g_iLaserMaterial, g_iHaloMaterial, 0, 30, 2.0, 2.0, 2.0, 2, 1.0, 0);
 		}
 	}
@@ -2176,7 +2207,7 @@ public Action Timer_ShowZoneWhileAdding(Handle timer, any userid)
 			
 			// See if there are any spectators to show this to too.
 			FillClientSpectators(client, iClients, iNumClients);
-			Effect_DrawBeamBox(iClients, iNumClients, fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
+			Effect_DrawBeamBox(iClients, iNumClients, fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, g_fBeamWidth, g_fBeamWidth, 2, g_fBeamAmplitude, {0,0,255,255}, 0);
 		}
 		return Plugin_Continue;
 	}
@@ -2256,7 +2287,7 @@ public Action Timer_ShowZoneWhileAdding(Handle timer, any userid)
 			Array_Copy(zoneData[ZD_mins], fMins, 3);
 			Array_Copy(zoneData[ZD_maxs], fMaxs, 3);
 			
-			Effect_DrawBeamBoxRotatable(iClients, iNumClients, fCenter, fMins, fMaxs, fRotation, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
+			Effect_DrawBeamBoxRotatable(iClients, iNumClients, fCenter, fMins, fMaxs, fRotation, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, g_fBeamWidth, g_fBeamWidth, 2, g_fBeamAmplitude, {0,0,255,255}, 0);
 			return Plugin_Continue;
 		}
 		
@@ -2278,7 +2309,7 @@ public Action Timer_ShowZoneWhileAdding(Handle timer, any userid)
 		}
 		
 		// TODO: When editing a zone, apply the rotation again.
-		Effect_DrawBeamBox(iClients, iNumClients, fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, 2.0, 2.0, 2, 1.0, {0,0,255,255}, 0);
+		Effect_DrawBeamBox(iClients, iNumClients, fFirstPoint, fSecondPoint, g_iLaserMaterial, g_iHaloMaterial, 0, 30, 0.1, g_fBeamWidth, g_fBeamWidth, 2, g_fBeamAmplitude, {0,0,255,255}, 0);
 	}
 	
 	return Plugin_Continue;
