@@ -1611,7 +1611,7 @@ public int Native_GetClusterZones(Handle plugin, int numParams)
 		if(zoneData[ZD_clusterIndex] != zoneCluster[ZC_index])
 			continue;
 		
-		hZones.PushArray(view_as<int>(zoneData[ZD_name]), ByteCountToCells(MAX_ZONE_NAME));
+		hZones.PushString(zoneData[ZD_name]);
 	}
 	
 	Handle hReturn = CloneHandle(hZones, plugin);
