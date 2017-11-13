@@ -128,6 +128,7 @@ ConVar g_hCVBeamSpeed;
 ConVar g_hCVDatabaseConfig;
 ConVar g_hCVTablePrefix;
 
+Handle g_hfwdOnZonesLoadedForward;
 Handle g_hfwdOnEnterForward;
 Handle g_hfwdOnLeaveForward;
 Handle g_hfwdOnCreatedForward;
@@ -163,6 +164,8 @@ char g_sCurrentMap[128];
 bool g_bConnectingToDatabase;
 // Used to discard old requests when changing the map fast.
 int g_iDatabaseSequence;
+// Keep track of the loaded (or failed) zones, so we know when we loaded all of them.
+int g_iProcessedGroupCount;
 
 // Support for browsing through nested menus
 int g_ClientMenuState[MAXPLAYERS+1][ClientMenuState];
@@ -220,17 +223,19 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 
 public void OnPluginStart()
 {
-	// forward MapZone_OnClientEnterZone(client, const String:sZoneGroup[], const String:sZoneName[]);
+	// forward void MapZone_OnZonesLoaded();
+	g_hfwdOnZonesLoadedForward = CreateGlobalForward("MapZone_OnZonesLoaded", ET_Ignore);
+	// forward void MapZone_OnClientEnterZone(int client, const char[] sZoneGroup, const char[] sZoneName);
 	g_hfwdOnEnterForward = CreateGlobalForward("MapZone_OnClientEnterZone", ET_Ignore, Param_Cell, Param_String, Param_String);
-	// forward MapZone_OnClientLeaveZone(client, const String:sZoneGroup[], const String:sZoneName[]);
+	// forward void MapZone_OnClientLeaveZone(int client, const char[] sZoneGroup, const char[] sZoneName);
 	g_hfwdOnLeaveForward = CreateGlobalForward("MapZone_OnClientLeaveZone", ET_Ignore, Param_Cell, Param_String, Param_String);
-	// forward MapZone_OnZoneCreated(const String:sZoneGroup[], const String:sZoneName[], ZoneType:type, iCreator);
+	// forward void MapZone_OnZoneCreated(const char[] sZoneGroup, const char[] sZoneName, ZoneType type, int iCreator);
 	g_hfwdOnCreatedForward = CreateGlobalForward("MapZone_OnZoneCreated", ET_Ignore, Param_String, Param_String, Param_Cell, Param_Cell);
-	// forward MapZone_OnZoneRemoved(const String:sZoneGroup[], const String:sZoneName[], ZoneType:type, iRemover);
+	// forward void MapZone_OnZoneRemoved(const char[] sZoneGroup, const char[] sZoneName, ZoneType type, int iRemover);
 	g_hfwdOnRemovedForward = CreateGlobalForward("MapZone_OnZoneRemoved", ET_Ignore, Param_String, Param_String, Param_Cell, Param_Cell);
-	// forward MapZone_OnZoneAddedToCluster(const String:sZoneGroup[], const String:sZoneName[], const String:sClusterName[], iAdmin);
+	// forward void MapZone_OnZoneAddedToCluster(const String:sZoneGroup[], const char[] sZoneName, const char[] sClusterName, int iAdmin);
 	g_hfwdOnAddedToClusterForward = CreateGlobalForward("MapZone_OnZoneAddedToCluster", ET_Ignore, Param_String, Param_String, Param_String, Param_Cell);
-	// forward MapZone_OnZoneRemovedFromCluster(const String:sZoneGroup[], const String:sZoneName[], const String:sClusterName[], iAdmin);
+	// forward void MapZone_OnZoneRemovedFromCluster(const char[] sZoneGroup, const char[] sZoneName, const char[] sClusterName, int iAdmin);
 	g_hfwdOnRemovedFromClusterForward = CreateGlobalForward("MapZone_OnZoneRemovedFromCluster", ET_Ignore, Param_String, Param_String, Param_String, Param_Cell);
 	// forward void MapZone_OnClientTeleportedToZone(int client, const char[] sZoneGroup, const char[] sZoneName);
 	g_hfwdOnClientTeleportedToZoneForward = CreateGlobalForward("MapZone_OnClientTeleportedToZone", ET_Ignore, Param_Cell, Param_String, Param_String);
@@ -4037,6 +4042,10 @@ void LoadAllGroupZones()
 		GetGroupByIndex(i, group);
 		LoadZoneGroup(group);
 	}
+
+	// Inform other plugins that the zone info is available now.
+	Call_StartForward(g_hfwdOnZonesLoadedForward);
+	Call_Finish();
 }
 
 bool LoadZoneGroup(group[ZoneGroup])
@@ -4470,10 +4479,23 @@ void LoadZonesFromConfigsInstead(int group[ZoneGroup])
 	LoadZoneGroup(group);
 	// Spawn the trigger_multiples for these zones
 	SetupGroupZones(group);
+
+	// This group is loaded now.
+	g_iProcessedGroupCount += 1;
+
+	// This was the last group. We loaded all of them now.
+	if (g_iProcessedGroupCount == g_hZoneGroups.Length)
+	{
+		Call_StartForward(g_hfwdOnZonesLoadedForward);
+		Call_Finish();
+	}
 }
 
 void LoadAllGroupZonesFromDatabase(int iSequence)
 {
+	// Start counting from the beginning now.
+	g_iProcessedGroupCount = 0;
+
 	int group[ZoneGroup];
 	int iSize = g_hZoneGroups.Length;
 	for(int i=0;i<iSize;i++)
@@ -4728,6 +4750,16 @@ public void SQL_GetZoneKeyValues(Database db, DBResultSet results, const char[] 
 	
 	// Inform other plugins that all the zones and clusters of this group are here now.
 	CallOnCreatedForAllInGroup(group);
+
+	// This group is loaded now.
+	g_iProcessedGroupCount += 1;
+
+	// This was the last group. We loaded all of them now.
+	if (g_iProcessedGroupCount == g_hZoneGroups.Length)
+	{
+		Call_StartForward(g_hfwdOnZonesLoadedForward);
+		Call_Finish();
+	}
 }
 
 public void SQL_LogError(Database db, DBResultSet results, const char[] error, any data)

@@ -447,6 +447,12 @@ native bool MapZone_GetCustomString(const char[] group, const char[] zoneName, c
 native bool MapZone_SetCustomString(const char[] group, const char[] zoneName, const char[] key, const char[] value);
 
 /**
+ * Called when all zones are loaded from the file
+ * or database.
+ */
+forward void MapZone_OnZonesLoaded();
+
+/**
  * Called when a client enteres a zone.
  * 
  * @param client      The client index.
