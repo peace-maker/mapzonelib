@@ -330,28 +330,6 @@ public void OnConfigsExecuted()
 	g_fBeamWidth = g_hCVBeamWidth.FloatValue;
 	g_fBeamAmplitude = g_hCVBeamAmplitude.FloatValue;
 	g_iBeamSpeed = g_hCVBeamSpeed.IntValue;
-	
-	// Cache the beam materials now that the changed convar values are loaded.
-	// Don't want to redefine the default sprites.
-	// Borrow them for different games from sm's default funcommands plugin.
-	Handle hGameConfig = LoadGameConfigFile("funcommands.games");
-	if (!hGameConfig)
-	{
-		SetFailState("Unable to load game config funcommands.games from stock sourcemod plugin for beam materials.");
-		return;
-	}
-
-	char sCustomMaterial[PLATFORM_MAX_PATH];
-	g_hCVBeamMaterial.GetString(sCustomMaterial, sizeof(sCustomMaterial));
-	g_iLaserMaterial = PrecacheCustomMaterial(hGameConfig, sCustomMaterial, "SpriteBeam");
-
-	g_hCVHaloMaterial.GetString(sCustomMaterial, sizeof(sCustomMaterial));
-	g_iHaloMaterial = PrecacheCustomMaterial(hGameConfig, sCustomMaterial, "SpriteHalo");
-	
-	g_hCVGlowMaterial.GetString(sCustomMaterial, sizeof(sCustomMaterial));
-	g_iGlowSprite = PrecacheCustomMaterial(hGameConfig, sCustomMaterial, "SpriteGlow");
-	
-	delete hGameConfig;
 
 	// Remove all zones of the old map
 	ClearZonesInGroups();
@@ -383,6 +361,28 @@ public void OnConfigsExecuted()
 public void OnMapStart()
 {
 	PrecacheModel("models/error.mdl", true);
+
+	// Cache the beam materials now that the changed convar values are loaded.
+	// Don't want to redefine the default sprites.
+	// Borrow them for different games from sm's default funcommands plugin.
+	Handle hGameConfig = LoadGameConfigFile("funcommands.games");
+	if (!hGameConfig)
+	{
+		SetFailState("Unable to load game config funcommands.games from stock sourcemod plugin for beam materials.");
+		return;
+	}
+
+	char sCustomMaterial[PLATFORM_MAX_PATH];
+	g_hCVBeamMaterial.GetString(sCustomMaterial, sizeof(sCustomMaterial));
+	g_iLaserMaterial = PrecacheCustomMaterial(hGameConfig, sCustomMaterial, "SpriteBeam");
+
+	g_hCVHaloMaterial.GetString(sCustomMaterial, sizeof(sCustomMaterial));
+	g_iHaloMaterial = PrecacheCustomMaterial(hGameConfig, sCustomMaterial, "SpriteHalo");
+	
+	g_hCVGlowMaterial.GetString(sCustomMaterial, sizeof(sCustomMaterial));
+	g_iGlowSprite = PrecacheCustomMaterial(hGameConfig, sCustomMaterial, "SpriteGlow");
+	
+	delete hGameConfig;
 
 	GetCurrentMap(g_sCurrentMap, sizeof(g_sCurrentMap));
 	
