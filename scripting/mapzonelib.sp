@@ -4443,6 +4443,10 @@ public void SQL_OnConnect(Database db, const char[] error, any data)
 	}
 	
 	g_hDatabase = db;
+
+	// Try to set the correct character set for the client connection.
+	if(!db.SetCharset("utf8mb4"))
+		db.SetCharset("utf8");
 	
 	// Check if there are our tables in the database already.
 	char sQuery[1024];
@@ -4461,10 +4465,10 @@ public void SQL_CheckTables(Database db, DBResultSet results, const char[] error
 	
 	char sQuery[1024];
 	Transaction hTransaction = new Transaction();
-	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%sclusters` (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, visibility INT DEFAULT %d, display_dimensions INT DEFAULT %d, CONSTRAINT cluster_in_group UNIQUE (groupname, map, name))", g_sTablePrefix, ZoneVisibility_Everyone, Dimension_3D);
+	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%sclusters` (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, visibility INT DEFAULT %d, display_dimensions INT DEFAULT %d, CONSTRAINT cluster_in_group UNIQUE (groupname, map, name)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", g_sTablePrefix, ZoneVisibility_Everyone, Dimension_3D);
 	hTransaction.AddQuery(sQuery);
 	
-	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%szones` (id INT NOT NULL AUTO_INCREMENT, cluster_id INT NULL, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, pos_x FLOAT NOT NULL, pos_y FLOAT NOT NULL, pos_z FLOAT NOT NULL, min_x FLOAT NOT NULL, min_y FLOAT NOT NULL, min_z FLOAT NOT NULL, max_x FLOAT NOT NULL, max_y FLOAT NOT NULL, max_z FLOAT NOT NULL, rotation_x FLOAT NOT NULL, rotation_y FLOAT NOT NULL, rotation_z FLOAT NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, visibility INT DEFAULT %d, display_dimensions INT DEFAULT %d, PRIMARY KEY (id), FOREIGN KEY (cluster_id) REFERENCES `%sclusters`(id) ON DELETE CASCADE, CONSTRAINT zone_in_group UNIQUE (groupname, map, name))", g_sTablePrefix, ZoneVisibility_Everyone, Dimension_3D, g_sTablePrefix);
+	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%szones` (id INT NOT NULL AUTO_INCREMENT, cluster_id INT NULL, groupname VARCHAR(64) NOT NULL, map VARCHAR(128) NOT NULL, name VARCHAR(64) NOT NULL, pos_x FLOAT NOT NULL, pos_y FLOAT NOT NULL, pos_z FLOAT NOT NULL, min_x FLOAT NOT NULL, min_y FLOAT NOT NULL, min_z FLOAT NOT NULL, max_x FLOAT NOT NULL, max_y FLOAT NOT NULL, max_z FLOAT NOT NULL, rotation_x FLOAT NOT NULL, rotation_y FLOAT NOT NULL, rotation_z FLOAT NOT NULL, team INT DEFAULT 0, color INT DEFAULT 0, visibility INT DEFAULT %d, display_dimensions INT DEFAULT %d, PRIMARY KEY (id), FOREIGN KEY (cluster_id) REFERENCES `%sclusters`(id) ON DELETE CASCADE, CONSTRAINT zone_in_group UNIQUE (groupname, map, name)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", g_sTablePrefix, ZoneVisibility_Everyone, Dimension_3D, g_sTablePrefix);
 	hTransaction.AddQuery(sQuery);
 	
 	Format(sQuery, sizeof(sQuery), "CREATE INDEX mapgroup on `%szones` (groupname, map)", g_sTablePrefix);
@@ -4473,10 +4477,10 @@ public void SQL_CheckTables(Database db, DBResultSet results, const char[] error
 	Format(sQuery, sizeof(sQuery), "CREATE INDEX mapgroup on `%sclusters` (groupname, map)", g_sTablePrefix);
 	hTransaction.AddQuery(sQuery);
 	
-	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%scustom_zone_keyvalues` (zone_id INT NOT NULL, setting VARCHAR(128) NOT NULL, val VARCHAR(256) NOT NULL, PRIMARY KEY (zone_id, setting), FOREIGN KEY (zone_id) REFERENCES `%szones`(id) ON DELETE CASCADE)", g_sTablePrefix, g_sTablePrefix);
+	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%scustom_zone_keyvalues` (zone_id INT NOT NULL, setting VARCHAR(128) NOT NULL, val VARCHAR(256) NOT NULL, PRIMARY KEY (zone_id, setting), FOREIGN KEY (zone_id) REFERENCES `%szones`(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", g_sTablePrefix, g_sTablePrefix);
 	hTransaction.AddQuery(sQuery);
 	
-	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%scustom_cluster_keyvalues` (cluster_id INT NOT NULL, setting VARCHAR(128) NOT NULL, val VARCHAR(256) NOT NULL, PRIMARY KEY (cluster_id, setting), FOREIGN KEY (cluster_id) REFERENCES `%sclusters`(id) ON DELETE CASCADE)", g_sTablePrefix, g_sTablePrefix);
+	Format(sQuery, sizeof(sQuery), "CREATE TABLE `%scustom_cluster_keyvalues` (cluster_id INT NOT NULL, setting VARCHAR(128) NOT NULL, val VARCHAR(256) NOT NULL, PRIMARY KEY (cluster_id, setting), FOREIGN KEY (cluster_id) REFERENCES `%sclusters`(id) ON DELETE CASCADE) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", g_sTablePrefix, g_sTablePrefix);
 	hTransaction.AddQuery(sQuery);
 	
 	g_hDatabase.Execute(hTransaction, SQLTxn_CreateTablesSuccess, SQLTxn_CreateTablesFailure);
