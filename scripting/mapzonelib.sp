@@ -178,6 +178,8 @@ Handle g_hShowZoneWhileEditTimer[MAXPLAYERS+1];
 float g_fAimCapTempAngles[MAXPLAYERS+1][3];
 // Store the buttons the player pressed in the previous frame, so we know when he started to press something.
 int g_iClientButtons[MAXPLAYERS+1];
+// Track if the player was dead before player_spawn was called.
+bool g_bClientWasDead[MAXPLAYERS+1];
 
 public Plugin myinfo = 
 {
@@ -285,7 +287,12 @@ public void OnPluginStart()
 	
 	// Clear menu states
 	for(int i=1;i<=MaxClients;i++)
+	{
 		OnClientDisconnect(i);
+		// Late loading support.
+		if(IsClientInGame(i))
+			g_bClientWasDead[i] = !IsPlayerAlive(i);
+	}
 }
 
 public void OnPluginEnd()
@@ -422,6 +429,7 @@ public void OnClientDisconnect(int client)
 	Array_Fill(g_ClientMenuState[client][CMS_center], 3, 0.0);
 	ResetZoneAddingState(client);
 	g_iClientButtons[client] = 0;
+	g_bClientWasDead[client] = true;
 	
 	ClearClientClipboard(client);
 	
@@ -825,6 +833,13 @@ public void Event_OnPlayerSpawn(Event event, const char[] name, bool dontBroadca
 	int client = GetClientOfUserId(event.GetInt("userid"));
 	if(!client)
 		return;
+
+	// The player was actually dead before being spawned again.
+	// No need for the workaround below.
+	bool bWasDead = g_bClientWasDead[client];
+	g_bClientWasDead[client] = !IsPlayerAlive(client);
+	if(bWasDead)
+		return;
 	
 	// Check if the players are in one of the zones
 	// THIS IS HORRBILE, but the engine doesn't really spawn players on round_start
@@ -860,6 +875,7 @@ public void Event_OnPlayerDeath(Event event, const char[] name, bool dontBroadca
 	if(!client)
 		return;
 	
+	g_bClientWasDead[client] = true;
 	// Dead players are in no zones anymore.
 	RemoveClientFromAllZones(client);
 }
@@ -1892,6 +1908,23 @@ public void EntOut_OnTouchEvent(const char[] output, int caller, int activator, 
 	if(EntRefToEntIndex(zoneData[ZD_triggerEntity]) != caller)
 	{
 		AcceptEntityInput(caller, "Kill");
+		return;
+	}
+
+	// The engine doesn't handle team changes correctly for players changing teams while in a trigger.
+	// When a player changes his team while in a zone the "EndTouch" callback is called.
+	// If he's spawned in that zone again right away afterwards, the physics system doesn't call "StartTouch" again.
+	// CTriggerMultiple wouldn't add the player to it's list of touching entites again,
+	// so the OnEndTouch output isn't fired when the player finally leaves the zone - 
+	// even though the physics system is calling "EndTouch" correctly. The trigger_multiple
+	// ignores that event, because the player isn't in his own list of touching entities.
+	//
+	// Work around that limitation by adding the player to the list of touching entities
+	// manually by triggering the "StartTouch" input on the trigger_multiple if the "OnTrigger"
+	// output is fired withouth the "OnStartTouch" output being fired beforehand.
+	if(StrEqual(output, "OnTrigger") && !zoneData[ZD_clientInZone][activator])
+	{
+		AcceptEntityInput(caller, "StartTouch", activator, activator);
 		return;
 	}
 	
