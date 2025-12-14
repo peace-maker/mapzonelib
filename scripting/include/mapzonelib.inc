@@ -19,7 +19,8 @@
 enum MapZoneType
 {
 	MapZoneType_Zone,
-	MapZoneType_Cluster
+	MapZoneType_Cluster,
+	MapZoneType_MAX,
 };
 
 /**
@@ -29,7 +30,8 @@ enum ZoneVisibility
 {
 	ZoneVisibility_WhenEditing, // Show zone when the zone editing menu is open. This is the default and will always be the case even if admins only is set as visibility.
 	ZoneVisibility_AdminsOnly,  // Show zones to admins only.
-	ZoneVisibility_Everyone     // Always show the zone to everyone.
+	ZoneVisibility_Everyone,    // Always show the zone to everyone.
+	ZoneVisibility_MAX,
 };
 
 /**
@@ -57,7 +59,8 @@ enum DisplayDimensions
 {
 	Dimension_1D, // Only show a single line between the two points of the zone.
 	Dimension_2D, // Draw the lower rectangle of the box on the ground only.
-	Dimension_3D  // Draw a full 3D box defining the zone.
+	Dimension_3D, // Draw a full 3D box defining the zone.
+	Dimension_MAX,
 };
 
 /**
